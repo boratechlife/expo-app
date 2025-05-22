@@ -31,7 +31,7 @@ export const initDB = async () => {
         unit_number TEXT NOT NULL,
         monthly_rent REAL NOT NULL,
         status TEXT DEFAULT 'vacant',
-        FOREIGN KEY (block_id) REFERENCES blocks (id)
+        FOREIGN KEY (block_id) REFERENCES blocks (id) on DELETE CASCADE
       );
       
       CREATE TABLE IF NOT EXISTS tenancies (
@@ -41,8 +41,8 @@ export const initDB = async () => {
         start_date TEXT NOT NULL,
         end_date TEXT,
         status TEXT DEFAULT 'active',
-        FOREIGN KEY (tenant_id) REFERENCES tenants (id),
-        FOREIGN KEY (unit_id) REFERENCES units (id)
+        FOREIGN KEY (tenant_id) REFERENCES tenants (id) on DELETE CASCADE,
+        FOREIGN KEY (unit_id) REFERENCES units (id) on DELETE CASCADE
       );
       
       CREATE TABLE IF NOT EXISTS payments (
@@ -53,7 +53,7 @@ export const initDB = async () => {
         payment_for_month TEXT NOT NULL,
         payment_method TEXT,
         notes TEXT,
-        FOREIGN KEY (tenancy_id) REFERENCES tenancies (id)
+        FOREIGN KEY (tenancy_id) REFERENCES tenancies (id) on DELETE CASCADE
       );
     `);
 

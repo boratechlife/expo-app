@@ -121,14 +121,14 @@ export default function DashboardScreen() {
       <View style={styles.statsContainer}>
         <View style={[styles.statCard, styles.incomeCard]}>
           <Text style={styles.statValue}>
-            ${stats.totalCollected.toFixed(2)}
+            Kes{stats.totalCollected.toFixed(2)}
           </Text>
           <Text style={styles.statLabel}>Total Collected</Text>
         </View>
 
         <View style={[styles.statCard, styles.outstandingCard]}>
           <Text style={styles.statValue}>
-            ${stats.totalOutstanding.toFixed(2)}
+            Kes{stats.totalOutstanding.toFixed(2)}
           </Text>
           <Text style={styles.statLabel}>Outstanding Balance</Text>
         </View>

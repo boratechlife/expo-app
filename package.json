@@ -37,7 +37,9 @@
     "react-native-screens": "~4.10.0",
     "react-native-web": "~0.20.0",
     "react-native-webview": "13.13.5",
-    "expo-sqlite": "~15.2.10"
+    "expo-sqlite": "~15.2.10",
+    "@react-native-picker/picker": "2.11.0",
+    "@react-native-community/datetimepicker": "8.3.0"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
