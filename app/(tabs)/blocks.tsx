@@ -6,6 +6,7 @@ import {
   Alert,
   FlatList,
   KeyboardAvoidingView,
+  Modal, // Import Modal
   Platform,
   StyleSheet,
   Text,
@@ -23,6 +24,24 @@ interface Block {
   created_at: string; // Add created_at
 }
 
+// --- COLOR PALETTE ---
+const Colors = {
+  primary: '#007bff', // Vibrant Blue
+  secondary: '#6c757d', // Muted Gray
+  success: '#28a745', // Green
+  warning: '#ffc107', // Amber/Yellow
+  error: '#dc3545', // Red
+  background: '#f8f9fa', // Light Gray
+  cardBackground: '#ffffff', // Pure White
+  textPrimary: '#212529', // Dark Charcoal
+  textSecondary: '#343a40', // Dark Gray
+  border: '#ced4da', // Light border gray
+  focusBorder: '#007bff', // Primary for focus
+  deleteRed: '#dc3545',
+  editBlue: '#007bff',
+  blockBorder: '#20c997', // A fresh green-blue for block cards
+};
+
 export default function BlocksScreen() {
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,13 +55,22 @@ export default function BlocksScreen() {
 
   // State for editing: null if not editing, otherwise the Block object being edited
   const [editingBlock, setEditingBlock] = useState<Block | null>(null);
+  const [modalVisible, setModalVisible] = useState(false); // State for modal visibility
+
+  // Input Focus States for styling
+  const [isNameFocused, setIsNameFocused] = useState(false);
+  const [isAddressFocused, setIsAddressFocused] = useState(false);
+  const [isUnitsFocused, setIsUnitsFocused] = useState(false);
+
+  // Input Validation States
+  const [isBlockNameValid, setIsBlockNameValid] = useState(true);
+  const [isTotalUnitsValid, setIsTotalUnitsValid] = useState(true);
 
   // Function to load blocks from the database
   const loadBlocks = async () => {
     setLoading(true);
     setError(null); // Clear previous errors
     try {
-      // Use the correct database name 'rental_management'
       const db = await SQLite.openDatabaseAsync('rental_management');
       const allBlocks = (await db.getAllAsync(
         'SELECT id, name, address, total_units, created_at FROM blocks ORDER BY name'
@@ -62,16 +90,27 @@ export default function BlocksScreen() {
 
   // Input validation function
   const validateInputs = (): boolean => {
+    let isValid = true;
+
     if (!blockName.trim()) {
-      Alert.alert('Validation Error', 'Block Name is required.');
-      return false;
+      setIsBlockNameValid(false);
+      isValid = false;
+    } else {
+      setIsBlockNameValid(true);
     }
+
     const parsedTotalUnits = parseInt(totalUnits);
     if (isNaN(parsedTotalUnits) || parsedTotalUnits <= 0) {
-      Alert.alert('Validation Error', 'Total Units must be a positive number.');
-      return false;
+      setIsTotalUnitsValid(false);
+      isValid = false;
+    } else {
+      setIsTotalUnitsValid(true);
     }
-    return true;
+
+    if (!isValid) {
+      Alert.alert('Validation Error', 'Please correct the highlighted fields.');
+    }
+    return isValid;
   };
 
   // Function to handle adding a new block
@@ -89,6 +128,7 @@ export default function BlocksScreen() {
       );
       Alert.alert('Success', 'Block added successfully!');
       clearForm(); // Clear input fields
+      setModalVisible(false); // Close modal
       loadBlocks(); // Refresh the list
     } catch (err: any) {
       console.error('Error adding block:', err);
@@ -111,6 +151,9 @@ export default function BlocksScreen() {
     setBlockName(block.name);
     setBlockAddress(block.address || ''); // Handle undefined/null address
     setTotalUnits(block.total_units.toString());
+    setIsBlockNameValid(true); // Reset validation on edit
+    setIsTotalUnitsValid(true);
+    setModalVisible(true); // Open modal for editing
   };
 
   // Function to handle updating an existing block
@@ -130,6 +173,7 @@ export default function BlocksScreen() {
       );
       Alert.alert('Success', 'Block updated successfully!');
       clearForm(); // Clear input fields and exit editing mode
+      setModalVisible(false); // Close modal
       loadBlocks(); // Refresh the list
     } catch (err: any) {
       console.error('Error updating block:', err);
@@ -170,10 +214,6 @@ export default function BlocksScreen() {
               loadBlocks(); // Refresh the list
             } catch (err: any) {
               console.error('Error deleting block:', err);
-              // Foreign key constraint failures on blocks usually means units are attached.
-              // Given your schema for units: FOREIGN KEY(block_id) REFERENCES blocks(id) ON DELETE CASCADE
-              // this specific error handling is for cases where 'ON DELETE NO ACTION' or 'RESTRICT' might be implicitly set or if something else is wrong.
-              // However, the Alert message is good for clarity.
               if (err.message.includes('FOREIGN KEY constraint failed')) {
                 Alert.alert(
                   'Deletion Restricted',
@@ -199,12 +239,17 @@ export default function BlocksScreen() {
     setBlockAddress('');
     setTotalUnits('');
     setEditingBlock(null);
+    setIsBlockNameValid(true); // Reset validation states
+    setIsTotalUnitsValid(true);
+    setIsNameFocused(false); // Reset focus states
+    setIsAddressFocused(false);
+    setIsUnitsFocused(false);
   };
 
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#007bff" />
+        <ActivityIndicator size="large" color={Colors.primary} />
         <Text style={styles.loadingText}>Loading blocks...</Text>
       </View>
     );
@@ -227,74 +272,13 @@ export default function BlocksScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 20}
     >
-      <Text style={styles.title}>Manage Blocks</Text>
-
-      {/* Input Form for Add/Edit */}
-      <View style={styles.formContainer}>
-        <TextInput
-          style={styles.input}
-          placeholder="Block Name (e.g., A Block)"
-          value={blockName}
-          onChangeText={setBlockName}
-          placeholderTextColor="#888"
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Address (Optional, e.g., 123 Main St)"
-          value={blockAddress}
-          onChangeText={setBlockAddress}
-          placeholderTextColor="#888"
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Total Units (e.g., 10)"
-          keyboardType="numeric"
-          value={totalUnits}
-          onChangeText={setTotalUnits}
-          placeholderTextColor="#888"
-        />
-        <View style={styles.buttonRow}>
-          {editingBlock ? (
-            <>
-              <TouchableOpacity
-                style={[styles.button, styles.updateButton]}
-                onPress={handleUpdateBlock}
-                disabled={isFormSubmitting}
-              >
-                <Ionicons name="save" size={20} color="#fff" />
-                <Text style={styles.buttonText}>
-                  {isFormSubmitting ? 'Updating...' : 'Update Block'}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.button, styles.cancelButton]}
-                onPress={clearForm}
-                disabled={isFormSubmitting}
-              >
-                <Ionicons name="close-circle" size={20} color="#fff" />
-                <Text style={styles.buttonText}>Cancel</Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <TouchableOpacity
-              style={[styles.button, styles.addButton]}
-              onPress={handleAddBlock}
-              disabled={isFormSubmitting}
-            >
-              <Ionicons name="add-circle" size={20} color="#fff" />
-              <Text style={styles.buttonText}>
-                {isFormSubmitting ? 'Adding...' : 'Add New Block'}
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
+      <Text style={styles.title}>Manage Property Blocks</Text>
 
       {/* List of Blocks */}
       <Text style={styles.listTitle}>Existing Blocks</Text>
       {blocks.length === 0 ? (
         <Text style={styles.noDataText}>
-          No blocks found. Start by adding one!
+          No blocks found. Tap the '+' button to add one!
         </Text>
       ) : (
         <FlatList
@@ -306,31 +290,58 @@ export default function BlocksScreen() {
                 <Text style={styles.blockName}>{item.name}</Text>
                 {item.address ? (
                   <Text style={styles.blockDetails}>
-                    <Ionicons name="location-outline" size={14} color="#666" />{' '}
+                    <Ionicons
+                      name="location-outline"
+                      size={16}
+                      color={Colors.textSecondary}
+                    />{' '}
                     {item.address}
                   </Text>
                 ) : null}
                 <Text style={styles.blockDetails}>
-                  <Ionicons name="cube-outline" size={14} color="#666" /> Units:{' '}
-                  {item.total_units}
+                  <Ionicons
+                    name="cube-outline"
+                    size={16}
+                    color={Colors.textSecondary}
+                  />{' '}
+                  Units:{' '}
+                  <Text style={styles.blockUnitsCount}>{item.total_units}</Text>
                 </Text>
                 <Text style={styles.blockCreated}>
-                  <Ionicons name="time-outline" size={14} color="#999" />{' '}
+                  <Ionicons
+                    name="time-outline"
+                    size={14}
+                    color={Colors.secondary}
+                  />{' '}
                   Created: {new Date(item.created_at).toLocaleDateString()}
                 </Text>
               </View>
               <View style={styles.cardActions}>
                 <TouchableOpacity
                   onPress={() => handleEditPress(item)}
-                  style={styles.actionButton}
+                  style={[
+                    styles.actionButton,
+                    { backgroundColor: Colors.cardBackground },
+                  ]}
                 >
-                  <Ionicons name="create-outline" size={24} color="#007bff" />
+                  <Ionicons
+                    name="create-outline"
+                    size={24}
+                    color={Colors.editBlue}
+                  />
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={() => handleDeleteBlock(item.id)}
-                  style={styles.actionButton}
+                  style={[
+                    styles.actionButton,
+                    { backgroundColor: Colors.cardBackground },
+                  ]}
                 >
-                  <Ionicons name="trash-outline" size={24} color="#dc3545" />
+                  <Ionicons
+                    name="trash-outline"
+                    size={24}
+                    color={Colors.deleteRed}
+                  />
                 </TouchableOpacity>
               </View>
             </View>
@@ -338,6 +349,171 @@ export default function BlocksScreen() {
           contentContainerStyle={styles.listContent}
         />
       )}
+
+      {/* Floating Action Button for Add */}
+      <TouchableOpacity
+        style={styles.fab}
+        onPress={() => {
+          clearForm(); // Ensure form is clear when opening for new entry
+          setModalVisible(true);
+        }}
+      >
+        <Ionicons name="add" size={30} color={Colors.cardBackground} />
+      </TouchableOpacity>
+
+      {/* Add/Edit Block Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={modalVisible}
+        onRequestClose={() => {
+          setModalVisible(!modalVisible);
+          clearForm();
+        }}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalContainer}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}
+        >
+          <View style={styles.modalContent}>
+            <TouchableOpacity
+              style={styles.modalCloseButton}
+              onPress={() => {
+                setModalVisible(false);
+                clearForm();
+              }}
+            >
+              <Ionicons
+                name="close-circle"
+                size={30}
+                color={Colors.secondary}
+              />
+            </TouchableOpacity>
+
+            <Text style={styles.modalTitle}>
+              {editingBlock ? 'Edit Block' : 'Create New Block'}
+            </Text>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>
+                Block Name <Text style={styles.requiredIndicator}>*</Text>
+              </Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  !isBlockNameValid && styles.inputError,
+                  isNameFocused && styles.inputFocused,
+                ]}
+                placeholder="e.g., A Block"
+                value={blockName}
+                onChangeText={(text) => {
+                  setBlockName(text);
+                  setIsBlockNameValid(true); // Clear error on change
+                }}
+                onFocus={() => setIsNameFocused(true)}
+                onBlur={() => setIsNameFocused(false)}
+                placeholderTextColor={Colors.secondary}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Address (Optional)</Text>
+              <TextInput
+                style={[styles.input, isAddressFocused && styles.inputFocused]}
+                placeholder="e.g., 123 Main St"
+                value={blockAddress}
+                onChangeText={setBlockAddress}
+                onFocus={() => setIsAddressFocused(true)}
+                onBlur={() => setIsAddressFocused(false)}
+                placeholderTextColor={Colors.secondary}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>
+                Total Units <Text style={styles.requiredIndicator}>*</Text>
+              </Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  !isTotalUnitsValid && styles.inputError,
+                  isUnitsFocused && styles.inputFocused,
+                ]}
+                placeholder="e.g., 10"
+                keyboardType="numeric"
+                value={totalUnits}
+                onChangeText={(text) => {
+                  setTotalUnits(text);
+                  setIsTotalUnitsValid(true); // Clear error on change
+                }}
+                onFocus={() => setIsUnitsFocused(true)}
+                onBlur={() => setIsUnitsFocused(false)}
+                placeholderTextColor={Colors.secondary}
+              />
+            </View>
+
+            <View style={styles.buttonRow}>
+              {editingBlock ? (
+                <>
+                  <TouchableOpacity
+                    style={[styles.button, styles.updateButton]}
+                    onPress={handleUpdateBlock}
+                    disabled={isFormSubmitting}
+                  >
+                    {isFormSubmitting ? (
+                      <ActivityIndicator color={Colors.cardBackground} />
+                    ) : (
+                      <Ionicons
+                        name="save"
+                        size={20}
+                        color={Colors.cardBackground}
+                      />
+                    )}
+                    <Text style={styles.buttonText}>
+                      {isFormSubmitting ? 'Updating...' : 'Update Block'}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.button, styles.cancelButton]}
+                    onPress={() => {
+                      setModalVisible(false);
+                      clearForm();
+                    }}
+                    disabled={isFormSubmitting}
+                  >
+                    <Ionicons
+                      name="close-circle"
+                      size={20}
+                      color={Colors.cardBackground}
+                    />
+                    <Text style={styles.buttonText}>Cancel</Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <TouchableOpacity
+                  style={[styles.button, styles.addButtonModal]}
+                  onPress={handleAddBlock}
+                  disabled={isFormSubmitting}
+                >
+                  {isFormSubmitting ? (
+                    <ActivityIndicator color={Colors.cardBackground} />
+                  ) : (
+                    <Ionicons
+                      name="add-circle"
+                      size={20}
+                      color={Colors.cardBackground}
+                    />
+                  )}
+                  <Text style={styles.buttonText}>
+                    {isFormSubmitting ? 'Adding...' : 'Create Block'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -346,150 +522,214 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 16,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: Colors.background,
   },
   centered: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: Colors.background,
   },
   title: {
-    fontSize: 28,
-    fontWeight: '700',
-    marginBottom: 25,
+    fontSize: 34,
+    fontWeight: '800',
+    marginBottom: 30,
     textAlign: 'center',
-    color: '#343a40',
+    color: Colors.textPrimary,
     textShadowColor: 'rgba(0, 0, 0, 0.1)',
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 2,
+    letterSpacing: -0.5,
   },
   listTitle: {
-    fontSize: 22,
-    fontWeight: '600',
+    fontSize: 24,
+    fontWeight: '700',
     marginTop: 25,
     marginBottom: 15,
-    color: '#343a40',
+    color: Colors.textPrimary,
     borderBottomWidth: 2,
-    borderBottomColor: '#e9ecef',
+    borderBottomColor: Colors.border,
     paddingBottom: 8,
   },
   loadingText: {
     marginTop: 10,
     fontSize: 16,
-    color: '#6c757d',
+    color: Colors.secondary,
   },
   errorText: {
     fontSize: 16,
-    color: '#dc3545',
+    color: Colors.error,
     textAlign: 'center',
     marginBottom: 15,
   },
   retryButton: {
-    backgroundColor: '#007bff',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
+    backgroundColor: Colors.primary,
+    paddingVertical: 12,
+    paddingHorizontal: 25,
     borderRadius: 8,
+    minHeight: 44, // Ensure touch target
   },
   retryButtonText: {
-    color: '#fff',
+    color: Colors.cardBackground,
     fontSize: 16,
     fontWeight: 'bold',
   },
-  formContainer: {
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 20,
+  // --- Modal Styles ---
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.6)', // Semi-transparent dark background
+    paddingHorizontal: 20,
+  },
+  modalContent: {
+    backgroundColor: Colors.cardBackground,
+    borderRadius: 15,
+    padding: 25,
+    width: '100%',
+    maxWidth: 400, // Max width for larger screens
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 15,
+    elevation: 10,
+    position: 'relative', // For close button positioning
+  },
+  modalCloseButton: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    padding: 10, // Increased touch area
+    zIndex: 1,
+  },
+  modalTitle: {
+    fontSize: 26,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  // --- Input Styles ---
+  inputGroup: {
+    marginBottom: 15,
+  },
+  inputLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+    marginBottom: 8,
+  },
+  requiredIndicator: {
+    color: Colors.error,
+    fontWeight: 'bold',
+    marginLeft: 2,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ced4da',
-    borderRadius: 8,
-    padding: 14,
-    marginBottom: 12,
+    borderColor: Colors.border,
+    borderRadius: 10,
+    padding: 16,
     fontSize: 16,
-    color: '#495057',
+    color: Colors.textSecondary,
+    backgroundColor: Colors.background,
+    minHeight: 50, // Ensure touch target
   },
+  inputFocused: {
+    borderColor: Colors.focusBorder,
+    borderWidth: 2,
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+  },
+  inputError: {
+    borderColor: Colors.error,
+    borderWidth: 2,
+  },
+  // --- Button Styles (General) ---
   buttonRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 15,
+    marginTop: 20,
   },
   button: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
+    paddingVertical: 14,
     paddingHorizontal: 15,
-    borderRadius: 8,
+    borderRadius: 10,
     flex: 1,
     marginHorizontal: 5,
+    minHeight: 50, // Ensure touch target
     shadowColor: 'rgba(0,0,0,0.2)',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 3,
     elevation: 3,
   },
-  addButton: {
-    backgroundColor: '#28a745',
-  },
-  updateButton: {
-    backgroundColor: '#007bff',
-  },
-  cancelButton: {
-    backgroundColor: '#6c757d',
-  },
   buttonText: {
-    color: '#fff',
+    color: Colors.cardBackground,
     fontSize: 16,
     fontWeight: 'bold',
     marginLeft: 8,
   },
+  addButtonModal: {
+    backgroundColor: Colors.success, // Use success for modal add
+    flex: 1,
+  },
+  updateButton: {
+    backgroundColor: Colors.primary,
+  },
+  cancelButton: {
+    backgroundColor: Colors.secondary,
+  },
+  // --- List/Card Styles ---
   listContent: {
-    paddingBottom: 30,
+    paddingBottom: 80, // Space for FAB
   },
   blockCard: {
-    backgroundColor: '#ffffff',
+    backgroundColor: Colors.cardBackground,
     borderRadius: 12,
     padding: 18,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 4,
+    marginBottom: 16,
+    shadowColor: Colors.textPrimary, // Darker shadow for more depth
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 8,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     borderLeftWidth: 5,
-    borderLeftColor: '#20c997', // A fresh green-blue for blocks
+    borderLeftColor: Colors.blockBorder, // A fresh green-blue for blocks
   },
   blockInfo: {
     flex: 1,
+    marginRight: 15, // Space between info and actions
   },
   blockName: {
-    fontSize: 19,
+    fontSize: 20,
     fontWeight: '700',
-    color: '#343a40',
-    marginBottom: 4,
+    color: Colors.textPrimary,
+    marginBottom: 6,
   },
   blockDetails: {
-    fontSize: 15,
-    color: '#666',
+    fontSize: 16,
+    color: Colors.textSecondary,
     marginTop: 2,
-    flexDirection: 'row', // Align icon and text
+    flexDirection: 'row',
     alignItems: 'center',
+    lineHeight: 22, // Improve readability
+  },
+  blockUnitsCount: {
+    fontWeight: 'bold', // Highlight unit count
+    color: Colors.textPrimary,
   },
   blockCreated: {
-    fontSize: 13,
-    color: '#999',
-    marginTop: 8,
+    fontSize: 14,
+    color: Colors.secondary,
+    marginTop: 10,
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -499,14 +739,38 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     marginLeft: 15,
-    padding: 8,
-    borderRadius: 5,
-    backgroundColor: '#f8f9fa',
+    padding: 10, // Generous padding for touch
+    borderRadius: 50, // Circular shape
+    backgroundColor: Colors.background, // Light background for action buttons
+    minWidth: 44, // Minimum touch target
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   noDataText: {
     textAlign: 'center',
     marginTop: 50,
     fontSize: 16,
-    color: '#888',
+    color: Colors.secondary,
+    paddingHorizontal: 20,
+    lineHeight: 24,
+  },
+  // --- Floating Action Button (FAB) ---
+  fab: {
+    position: 'absolute',
+    bottom: 25,
+    right: 25,
+    backgroundColor: Colors.primary,
+    borderRadius: 30, // Make it circular
+    width: 60,
+    height: 60,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: Colors.textPrimary,
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+    zIndex: 10, // Ensure it's above other content
   },
 });
