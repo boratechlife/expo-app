@@ -1,24 +1,28 @@
 import { Ionicons } from '@expo/vector-icons';
-import DateTimePicker from '@react-native-community/datetimepicker'; // For date input
-import { Picker } from '@react-native-picker/picker'; // For tenancy selection
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { Picker } from '@react-native-picker/picker';
 import * as SQLite from 'expo-sqlite';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   FlatList,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from 'react-native';
 
 // Ensure you have these installed:
 // expo install @react-native-picker/picker
 // expo install @react-native-community/datetimepicker
+// expo install expo-sqlite
 
 interface Tenancy {
   id: number;
@@ -26,10 +30,10 @@ interface Tenancy {
   tenant_name: string;
   unit_id: number;
   unit_number: string;
-  block_name: string; // Including block_name for clearer picker display
+  block_name: string;
   start_date: string;
-  end_date: string; // Could be null if active
-  status: string; // 'active', 'ended'
+  end_date: string;
+  status: string;
 }
 
 interface Payment {
@@ -39,30 +43,40 @@ interface Payment {
   payment_date: string; // YYYY-MM-DD
   payment_for_month: string; // YYYY-MM
   tenant_name: string;
-  unit_number: string; // Display for context
-  block_name: string; // Added this as it's fetched for display
+  unit_number: string;
+  block_name: string;
 }
+
+const { height } = Dimensions.get('window');
 
 export default function PaymentsScreen() {
   const [payments, setPayments] = useState<Payment[]>([]);
-  const [tenancies, setTenancies] = useState<Tenancy[]>([]); // To select a tenancy for payment
+  const [tenancies, setTenancies] = useState<Tenancy[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isFormSubmitting, setIsFormSubmitting] = useState(false); // To disable buttons during submission
+  const [isFormSubmitting, setIsFormSubmitting] = useState(false);
 
   // Form input states
   const [selectedTenancyId, setSelectedTenancyId] = useState<number | null>(
     null
   );
   const [paymentAmount, setPaymentAmount] = useState('');
-  const [paymentDate, setPaymentDate] = useState(new Date()); // For actual payment date
-  const [paymentForMonthDate, setPaymentForMonthDate] = useState(new Date()); // For the 'payment_for_month' field (Month/Year)
+  const [paymentDate, setPaymentDate] = useState(new Date());
+  const [paymentForMonthDate, setPaymentForMonthDate] = useState(new Date());
   const [showPaymentDatePicker, setShowPaymentDatePicker] = useState(false);
   const [showPaymentForMonthPicker, setShowPaymentForMonthPicker] =
     useState(false);
 
   // Editing state
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
+  const [modalVisible, setModalVisible] = useState(false);
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filteredPayments, setFilteredPayments] = useState<Payment[]>([]);
+
+  // Refs for input focus
+  const amountInputRef = useRef<TextInput>(null);
 
   // --- Helper Functions ---
   const formatDate = (date: Date): string => {
@@ -76,10 +90,8 @@ export default function PaymentsScreen() {
   };
 
   const getMonthName = (dateString: string): string => {
-    // Expects YYYY-MM format
     if (!dateString) return '';
     const [year, month] = dateString.split('-');
-    // Date object needs a day, so add -01 for consistency. Month is 0-indexed.
     const date = new Date(parseInt(year), parseInt(month) - 1, 1);
     return date.toLocaleString('default', { month: 'long', year: 'numeric' });
   };
@@ -87,11 +99,10 @@ export default function PaymentsScreen() {
   // --- Data Loading ---
   const loadData = async () => {
     setLoading(true);
-    setError(null); // Clear previous errors
+    setError(null);
     try {
       const db = await SQLite.openDatabaseAsync('rental_management_2');
 
-      // Fetch all payments with tenant, unit, and block details for display
       const allPayments = (await db.getAllAsync(`
         SELECT
           p.id,
@@ -116,8 +127,8 @@ export default function PaymentsScreen() {
           p.payment_date DESC, p.id DESC
       `)) as Payment[];
       setPayments(allPayments);
+      setFilteredPayments(allPayments); // Initialize filtered payments
 
-      // Fetch active tenancies for the picker
       const activeTenancies = (await db.getAllAsync(`
         SELECT
           ten.id,
@@ -144,7 +155,6 @@ export default function PaymentsScreen() {
       `)) as Tenancy[];
       setTenancies(activeTenancies);
 
-      // Set default selected tenancy if any active tenancies exist and none is selected
       if (
         activeTenancies.length > 0 &&
         selectedTenancyId === null &&
@@ -152,9 +162,9 @@ export default function PaymentsScreen() {
       ) {
         setSelectedTenancyId(activeTenancies[0].id);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error loading data:', err);
-      setError('Failed to load data. Please try again.');
+      setError(`Failed to load data: ${err.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
@@ -164,30 +174,56 @@ export default function PaymentsScreen() {
     loadData();
   }, []);
 
+  useEffect(() => {
+    // Apply search filter whenever payments or searchQuery changes
+    const lowerCaseQuery = searchQuery.toLowerCase();
+    const newFilteredPayments = payments.filter(
+      (payment) =>
+        payment.tenant_name.toLowerCase().includes(lowerCaseQuery) ||
+        payment.unit_number.toLowerCase().includes(lowerCaseQuery) ||
+        payment.block_name.toLowerCase().includes(lowerCaseQuery) ||
+        payment.payment_date.includes(lowerCaseQuery) ||
+        getMonthName(payment.payment_for_month)
+          .toLowerCase()
+          .includes(lowerCaseQuery) ||
+        payment.amount.toString().includes(lowerCaseQuery)
+    );
+    setFilteredPayments(newFilteredPayments);
+  }, [payments, searchQuery]);
+
   // --- Date Picker Handlers ---
   const onPaymentDateChange = (event: any, selectedDate?: Date) => {
     const currentDate = selectedDate || paymentDate;
-    setShowPaymentDatePicker(false); // Close picker after selection
+    setShowPaymentDatePicker(Platform.OS === 'ios'); // Keep open on iOS for 'inline'
     setPaymentDate(currentDate);
+    if (Platform.OS === 'android') {
+      setShowPaymentDatePicker(false);
+    }
   };
 
   const onPaymentForMonthChange = (event: any, selectedDate?: Date) => {
     const currentDate = selectedDate || paymentForMonthDate;
-    setShowPaymentForMonthPicker(false); // Close picker after selection
+    setShowPaymentForMonthPicker(Platform.OS === 'ios'); // Keep open on iOS for 'inline'
     setPaymentForMonthDate(currentDate);
+    if (Platform.OS === 'android') {
+      setShowPaymentForMonthPicker(false);
+    }
   };
 
   // --- Input Validation ---
   const validateInputs = (): boolean => {
     if (selectedTenancyId === null) {
-      Alert.alert('Validation Error', 'Please select a Tenancy.');
+      Alert.alert('Validation Error', 'Please select a Tenancy.', [
+        { text: 'OK' },
+      ]);
       return false;
     }
     const amount = parseFloat(paymentAmount);
     if (isNaN(amount) || amount <= 0) {
       Alert.alert(
         'Validation Error',
-        'Payment Amount must be a positive number.'
+        'Payment Amount must be a positive number.',
+        [{ text: 'OK' }]
       );
       return false;
     }
@@ -206,21 +242,19 @@ export default function PaymentsScreen() {
         selectedTenancyId,
         parseFloat(paymentAmount),
         formatDate(paymentDate),
-        formatMonthYear(paymentForMonthDate) // Insert YYYY-MM
+        formatMonthYear(paymentForMonthDate)
       );
-      Alert.alert('Success', 'Payment added successfully!');
+      Alert.alert('Success', 'Payment added successfully!', [{ text: 'OK' }]);
       clearForm();
+      setModalVisible(false);
       loadData();
     } catch (err: any) {
       console.error('Error adding payment:', err);
-      if (err.message.includes('FOREIGN KEY constraint failed')) {
-        Alert.alert(
-          'Error',
-          'Invalid Tenancy selected. Please ensure it exists.'
-        );
-      } else {
-        Alert.alert('Error', 'Failed to add payment. Please try again.');
-      }
+      Alert.alert(
+        'Error',
+        `Failed to add payment: ${err.message || 'Please try again.'}`,
+        [{ text: 'OK' }]
+      );
     } finally {
       setIsFormSubmitting(false);
     }
@@ -230,12 +264,11 @@ export default function PaymentsScreen() {
     setEditingPayment(payment);
     setSelectedTenancyId(payment.tenancy_id);
     setPaymentAmount(payment.amount.toString());
-    // Convert YYYY-MM-DD string to Date object
     setPaymentDate(new Date(payment.payment_date + 'T00:00:00'));
-    // Recreate Date object for payment_for_month (YYYY-MM to Date object for picker)
     setPaymentForMonthDate(
       new Date(payment.payment_for_month + '-01T00:00:00')
     );
+    setModalVisible(true);
   };
 
   const handleUpdatePayment = async () => {
@@ -250,22 +283,20 @@ export default function PaymentsScreen() {
         selectedTenancyId,
         parseFloat(paymentAmount),
         formatDate(paymentDate),
-        formatMonthYear(paymentForMonthDate), // Update YYYY-MM
+        formatMonthYear(paymentForMonthDate),
         editingPayment.id
       );
-      Alert.alert('Success', 'Payment updated successfully!');
+      Alert.alert('Success', 'Payment updated successfully!', [{ text: 'OK' }]);
       clearForm();
+      setModalVisible(false);
       loadData();
     } catch (err: any) {
       console.error('Error updating payment:', err);
-      if (err.message.includes('FOREIGN KEY constraint failed')) {
-        Alert.alert(
-          'Error',
-          'Invalid Tenancy selected. Please ensure it exists.'
-        );
-      } else {
-        Alert.alert('Error', 'Failed to update payment. Please try again.');
-      }
+      Alert.alert(
+        'Error',
+        `Failed to update payment: ${err.message || 'Please try again.'}`,
+        [{ text: 'OK' }]
+      );
     } finally {
       setIsFormSubmitting(false);
     }
@@ -287,13 +318,18 @@ export default function PaymentsScreen() {
             try {
               const db = await SQLite.openDatabaseAsync('rental_management_2');
               await db.runAsync('DELETE FROM payments WHERE id = ?', id);
-              Alert.alert('Success', 'Payment deleted successfully!');
+              Alert.alert('Success', 'Payment deleted successfully!', [
+                { text: 'OK' },
+              ]);
               loadData();
-            } catch (err) {
+            } catch (err: any) {
               console.error('Error deleting payment:', err);
               Alert.alert(
                 'Error',
-                'Failed to delete payment. Please try again.'
+                `Failed to delete payment: ${
+                  err.message || 'Please try again.'
+                }`,
+                [{ text: 'OK' }]
               );
             }
           },
@@ -306,13 +342,18 @@ export default function PaymentsScreen() {
   const clearForm = () => {
     setPaymentAmount('');
     setPaymentDate(new Date());
-    setPaymentForMonthDate(new Date()); // Reset to current date
+    setPaymentForMonthDate(new Date());
     setEditingPayment(null);
     if (tenancies.length > 0) {
       setSelectedTenancyId(tenancies[0].id);
     } else {
       setSelectedTenancyId(null);
     }
+  };
+
+  const handleAddNewPress = () => {
+    clearForm();
+    setModalVisible(true);
   };
 
   // --- Loading & Error States ---
@@ -341,140 +382,48 @@ export default function PaymentsScreen() {
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 20} // Adjust offset as needed
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 20}
     >
       <Text style={styles.title}>Manage Payments</Text>
 
-      {/* Input Form for Add/Edit */}
-      <View style={styles.formContainer}>
-        <Text style={styles.label}>Select Tenancy:</Text>
-        <View style={styles.pickerContainer}>
-          <Picker
-            selectedValue={selectedTenancyId}
-            onValueChange={(itemValue: number | null) =>
-              setSelectedTenancyId(itemValue)
-            }
-            style={styles.picker}
-            enabled={tenancies.length > 0 && !isFormSubmitting} // Disable picker during submission
-          >
-            {tenancies.length === 0 ? (
-              <Picker.Item label="No Active Tenancies" value={null} />
-            ) : (
-              tenancies.map((tenancy) => (
-                <Picker.Item
-                  key={tenancy.id}
-                  label={`${tenancy.tenant_name} (${tenancy.block_name} - ${tenancy.unit_number})`}
-                  value={tenancy.id}
-                />
-              ))
-            )}
-          </Picker>
-        </View>
-
-        <TextInput
-          style={styles.input}
-          placeholder="Payment Amount (e.g., 8000.00)"
-          keyboardType="numeric"
-          value={paymentAmount}
-          onChangeText={setPaymentAmount}
-          editable={!isFormSubmitting}
-          placeholderTextColor="#888"
+      {/* Search Bar */}
+      <View style={styles.searchContainer}>
+        <Ionicons
+          name="search"
+          size={20}
+          color="#6c757d"
+          style={styles.searchIcon}
         />
-
-        {/* Payment Date Selector */}
-        <View style={styles.datePickerRow}>
-          <Text style={styles.dateLabel}>
-            <Ionicons name="calendar-outline" size={18} color="#495057" />{' '}
-            Payment Date: {formatDate(paymentDate)}
-          </Text>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search payments by tenant, unit, or date..."
+          placeholderTextColor="#888"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+        {searchQuery.length > 0 && (
           <TouchableOpacity
-            onPress={() => setShowPaymentDatePicker(true)}
-            style={styles.datePickerButton}
-            disabled={isFormSubmitting}
+            onPress={() => setSearchQuery('')}
+            style={styles.clearSearchButton}
           >
-            <Text style={styles.datePickerButtonText}>Select Date</Text>
+            <Ionicons name="close-circle" size={20} color="#6c757d" />
           </TouchableOpacity>
-        </View>
-        {showPaymentDatePicker && (
-          <DateTimePicker
-            testID="paymentDatePicker"
-            value={paymentDate}
-            mode="date"
-            display={Platform.OS === 'ios' ? 'inline' : 'default'} // Inline for iOS, modal for Android
-            onChange={onPaymentDateChange}
-          />
         )}
-
-        {/* Payment For Month Selector */}
-        <View style={styles.datePickerRow}>
-          <Text style={styles.dateLabel}>
-            <Ionicons name="cash-outline" size={18} color="#495057" /> Payment
-            For: {getMonthName(formatMonthYear(paymentForMonthDate))}
-          </Text>
-          <TouchableOpacity
-            onPress={() => setShowPaymentForMonthPicker(true)}
-            style={styles.datePickerButton}
-            disabled={isFormSubmitting}
-          >
-            <Text style={styles.datePickerButtonText}>Select Month/Year</Text>
-          </TouchableOpacity>
-        </View>
-        {showPaymentForMonthPicker && (
-          <DateTimePicker
-            testID="paymentForMonthPicker"
-            value={paymentForMonthDate}
-            mode="date" // We use 'date' mode and then format to 'YYYY-MM'
-            display={Platform.OS === 'ios' ? 'inline' : 'default'} // Inline for iOS, modal for Android
-            onChange={onPaymentForMonthChange}
-          />
-        )}
-
-        <View style={styles.buttonRow}>
-          {editingPayment ? (
-            <>
-              <TouchableOpacity
-                style={[styles.button, styles.updateButton]}
-                onPress={handleUpdatePayment}
-                disabled={isFormSubmitting}
-              >
-                <Ionicons name="save" size={20} color="#fff" />
-                <Text style={styles.buttonText}>
-                  {isFormSubmitting ? 'Updating...' : 'Update Payment'}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.button, styles.cancelButton]}
-                onPress={clearForm}
-                disabled={isFormSubmitting}
-              >
-                <Ionicons name="close-circle" size={20} color="#fff" />
-                <Text style={styles.buttonText}>Cancel</Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <TouchableOpacity
-              style={[styles.button, styles.addButton]}
-              onPress={handleAddPayment}
-              disabled={isFormSubmitting}
-            >
-              <Ionicons name="add-circle" size={20} color="#fff" />
-              <Text style={styles.buttonText}>
-                {isFormSubmitting ? 'Adding...' : 'Add New Payment'}
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
       </View>
 
       {/* List of Payments */}
       <Text style={styles.listTitle}>Recorded Payments</Text>
-      {payments.length === 0 ? (
+      {filteredPayments.length === 0 && searchQuery === '' ? (
         <Text style={styles.noDataText}>
-          No payments recorded yet. Add some!
+          No payments recorded yet. Add some using the '+' button!
+        </Text>
+      ) : filteredPayments.length === 0 && searchQuery !== '' ? (
+        <Text style={styles.noDataText}>
+          No payments found for "{searchQuery}".
         </Text>
       ) : (
         <FlatList
-          data={payments}
+          data={filteredPayments}
           keyExtractor={(item) => item.id.toString()}
           renderItem={({ item }) => (
             <View style={styles.paymentCard}>
@@ -484,19 +433,31 @@ export default function PaymentsScreen() {
                 </Text>
                 <Text style={styles.paymentDetails}>
                   <Ionicons name="person-outline" size={14} color="#666" />{' '}
-                  Tenant: {item.tenant_name}
+                  Tenant:{' '}
+                  <Text style={styles.paymentDetailsBold}>
+                    {item.tenant_name}
+                  </Text>
                 </Text>
                 <Text style={styles.paymentDetails}>
                   <Ionicons name="business-outline" size={14} color="#666" />{' '}
-                  Unit: {item.block_name} - {item.unit_number}
+                  Unit:{' '}
+                  <Text style={styles.paymentDetailsBold}>
+                    {item.block_name} - {item.unit_number}
+                  </Text>
                 </Text>
                 <Text style={styles.paymentDetails}>
                   <Ionicons name="calendar-outline" size={14} color="#666" />{' '}
-                  Paid On: {item.payment_date}
+                  Paid On:{' '}
+                  <Text style={styles.paymentDetailsBold}>
+                    {item.payment_date}
+                  </Text>
                 </Text>
                 <Text style={styles.paymentDetails}>
                   <Ionicons name="cash-outline" size={14} color="#666" /> For
-                  Month: {getMonthName(item.payment_for_month)}
+                  Month:{' '}
+                  <Text style={styles.paymentDetailsBold}>
+                    {getMonthName(item.payment_for_month)}
+                  </Text>
                 </Text>
               </View>
               <View style={styles.cardActions}>
@@ -518,6 +479,182 @@ export default function PaymentsScreen() {
           contentContainerStyle={styles.listContent}
         />
       )}
+
+      {/* Floating Action Button */}
+      <TouchableOpacity style={styles.fab} onPress={handleAddNewPress}>
+        <Ionicons name="add" size={30} color="#fff" />
+      </TouchableOpacity>
+
+      {/* Payment Form Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={modalVisible}
+        onRequestClose={() => {
+          setModalVisible(!modalVisible);
+          clearForm();
+        }}
+      >
+        <TouchableWithoutFeedback
+          onPress={() => {
+            // Dismiss keyboard when clicking outside the form
+            // but not the modal itself to allow scrolling
+            if (Platform.OS !== 'ios') {
+              // iOS handles this better with KeyboardAvoidingView
+              // No specific dismiss for Android, but this handles tapping outside specific inputs
+            }
+          }}
+        >
+          <KeyboardAvoidingView
+            style={styles.modalOverlay}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}
+          >
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>
+                {editingPayment ? 'Edit Payment' : 'Add New Payment'}
+              </Text>
+
+              <Text style={styles.label}>Select Tenancy:</Text>
+              <View style={styles.pickerContainer}>
+                <Picker
+                  selectedValue={selectedTenancyId}
+                  onValueChange={(itemValue: number | null) =>
+                    setSelectedTenancyId(itemValue)
+                  }
+                  style={styles.picker}
+                  enabled={tenancies.length > 0 && !isFormSubmitting}
+                >
+                  {tenancies.length === 0 ? (
+                    <Picker.Item label="No Active Tenancies" value={null} />
+                  ) : (
+                    tenancies.map((tenancy) => (
+                      <Picker.Item
+                        key={tenancy.id}
+                        label={`${tenancy.tenant_name} (${tenancy.block_name} - ${tenancy.unit_number})`}
+                        value={tenancy.id}
+                      />
+                    ))
+                  )}
+                </Picker>
+              </View>
+
+              <Text style={styles.label}>Payment Amount:</Text>
+              <TextInput
+                ref={amountInputRef}
+                style={styles.input}
+                placeholder="e.g., 8000.00"
+                keyboardType="numeric"
+                value={paymentAmount}
+                onChangeText={setPaymentAmount}
+                editable={!isFormSubmitting}
+                placeholderTextColor="#888"
+              />
+
+              {/* Payment Date Selector */}
+              <View style={styles.datePickerRow}>
+                <Text style={styles.dateLabel}>
+                  <Ionicons name="calendar-outline" size={18} color="#495057" />{' '}
+                  Payment Date:{' '}
+                  <Text style={styles.dateDisplay}>
+                    {formatDate(paymentDate)}
+                  </Text>
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setShowPaymentDatePicker(true)}
+                  style={styles.datePickerButton}
+                  disabled={isFormSubmitting}
+                >
+                  <Text style={styles.datePickerButtonText}>Select</Text>
+                </TouchableOpacity>
+              </View>
+              {showPaymentDatePicker && (
+                <DateTimePicker
+                  testID="paymentDatePicker"
+                  value={paymentDate}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'} // Spinner for iOS to save space
+                  onChange={onPaymentDateChange}
+                />
+              )}
+
+              {/* Payment For Month Selector */}
+              <View style={styles.datePickerRow}>
+                <Text style={styles.dateLabel}>
+                  <Ionicons name="cash-outline" size={18} color="#495057" />{' '}
+                  Payment For:{' '}
+                  <Text style={styles.dateDisplay}>
+                    {getMonthName(formatMonthYear(paymentForMonthDate))}
+                  </Text>
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setShowPaymentForMonthPicker(true)}
+                  style={styles.datePickerButton}
+                  disabled={isFormSubmitting}
+                >
+                  <Text style={styles.datePickerButtonText}>Select Month</Text>
+                </TouchableOpacity>
+              </View>
+              {showPaymentForMonthPicker && (
+                <DateTimePicker
+                  testID="paymentForMonthPicker"
+                  value={paymentForMonthDate}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'} // Spinner for iOS to save space
+                  onChange={onPaymentForMonthChange}
+                />
+              )}
+
+              <View style={styles.buttonRow}>
+                {editingPayment ? (
+                  <>
+                    <TouchableOpacity
+                      style={[styles.button, styles.updateButton]}
+                      onPress={handleUpdatePayment}
+                      disabled={isFormSubmitting}
+                    >
+                      {isFormSubmitting ? (
+                        <ActivityIndicator color="#fff" />
+                      ) : (
+                        <Ionicons name="save" size={20} color="#fff" />
+                      )}
+                      <Text style={styles.buttonText}>
+                        {isFormSubmitting ? 'Updating...' : 'Update Payment'}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.button, styles.cancelButton]}
+                      onPress={() => {
+                        setModalVisible(false);
+                        clearForm();
+                      }}
+                      disabled={isFormSubmitting}
+                    >
+                      <Ionicons name="close-circle" size={20} color="#fff" />
+                      <Text style={styles.buttonText}>Cancel</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <TouchableOpacity
+                    style={[styles.button, styles.addButton]}
+                    onPress={handleAddPayment}
+                    disabled={isFormSubmitting}
+                  >
+                    {isFormSubmitting ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Ionicons name="add-circle" size={20} color="#fff" />
+                    )}
+                    <Text style={styles.buttonText}>
+                      {isFormSubmitting ? 'Adding...' : 'Add New Payment'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </TouchableWithoutFeedback>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -526,208 +663,291 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 16,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#f0f2f5', // Light gray background
   },
   centered: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#f0f2f5',
   },
   title: {
-    fontSize: 28,
-    fontWeight: '700',
+    fontSize: 32,
+    fontWeight: '800', // Extra bold
     marginBottom: 25,
     textAlign: 'center',
-    color: '#343a40',
-    textShadowColor: 'rgba(0, 0, 0, 0.1)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
+    color: '#2c3e50', // Darker text for contrast
+    textShadowColor: 'rgba(0, 0, 0, 0.05)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
   },
   listTitle: {
     fontSize: 22,
-    fontWeight: '600',
+    fontWeight: '700', // Bold
     marginTop: 25,
     marginBottom: 15,
-    color: '#343a40',
+    color: '#34495e', // Slightly lighter dark
     borderBottomWidth: 2,
-    borderBottomColor: '#e9ecef',
+    borderBottomColor: '#e0e6ed',
     paddingBottom: 8,
   },
   loadingText: {
     marginTop: 10,
     fontSize: 16,
-    color: '#6c757d',
+    color: '#7f8c8d', // Muted gray
   },
   errorText: {
     fontSize: 16,
-    color: '#dc3545',
+    color: '#e74c3c', // Red error
     textAlign: 'center',
     marginBottom: 15,
   },
   retryButton: {
-    backgroundColor: '#007bff',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    marginTop: 10,
+    backgroundColor: '#3498db', // Blue
+    paddingVertical: 12,
+    paddingHorizontal: 25,
+    borderRadius: 10,
+    marginTop: 15,
+    shadowColor: 'rgba(0, 0, 0, 0.1)',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 4,
   },
   retryButtonText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: 'bold',
   },
-  formContainer: {
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.6)', // Semi-transparent overlay
+  },
+  modalContent: {
     backgroundColor: '#ffffff',
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 20,
+    borderRadius: 15,
+    padding: 25,
+    width: '90%',
+    maxHeight: height * 0.8, // Limit modal height
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 15,
+    elevation: 10,
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    marginBottom: 20,
+    textAlign: 'center',
+    color: '#2c3e50',
   },
   label: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 5,
-    color: '#333',
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 6,
+    color: '#34495e',
+    marginTop: 10,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ced4da',
-    borderRadius: 8,
+    borderColor: '#bdc3c7', // Lighter gray border
+    borderRadius: 10,
     padding: 14,
-    marginBottom: 12,
+    marginBottom: 15,
     fontSize: 16,
-    color: '#495057',
+    color: '#34495e',
+    backgroundColor: '#ecf0f1', // Light input background
   },
   pickerContainer: {
     borderWidth: 1,
-    borderColor: '#ced4da',
-    borderRadius: 8,
-    marginBottom: 12,
+    borderColor: '#bdc3c7',
+    borderRadius: 10,
+    marginBottom: 15,
     overflow: 'hidden',
-    backgroundColor: '#f1f3f5',
+    backgroundColor: '#ecf0f1',
   },
   picker: {
     height: 50,
     width: '100%',
-    color: '#495057',
+    color: '#34495e',
   },
   datePickerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
-    padding: 14,
+    marginBottom: 15,
+    paddingVertical: 12,
+    paddingHorizontal: 15,
     borderWidth: 1,
-    borderColor: '#ced4da',
-    borderRadius: 8,
-    backgroundColor: '#f1f3f5',
+    borderColor: '#bdc3c7',
+    borderRadius: 10,
+    backgroundColor: '#ecf0f1',
   },
   dateLabel: {
     flexDirection: 'row',
     alignItems: 'center',
     fontSize: 16,
-    color: '#495057',
+    color: '#34495e',
+  },
+  dateDisplay: {
+    fontWeight: 'bold',
+    color: '#2c3e50',
   },
   datePickerButton: {
-    paddingVertical: 5,
-    paddingHorizontal: 10,
-    backgroundColor: '#e9ecef',
-    borderRadius: 5,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#bdc3c7', // Muted background
+    borderRadius: 8,
   },
   datePickerButtonText: {
-    color: '#007bff',
+    color: '#2c3e50',
     fontSize: 15,
-    fontWeight: 'bold',
+    fontWeight: '600',
   },
   buttonRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 15,
+    justifyContent: 'space-around',
+    marginTop: 20,
   },
   button: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 15,
-    borderRadius: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    borderRadius: 10,
     flex: 1,
     marginHorizontal: 5,
     shadowColor: 'rgba(0,0,0,0.2)',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 6,
   },
   addButton: {
-    backgroundColor: '#28a745',
+    backgroundColor: '#27ae60', // Emerald green
   },
   updateButton: {
-    backgroundColor: '#007bff',
+    backgroundColor: '#2980b9', // Peter River blue
   },
   cancelButton: {
-    backgroundColor: '#6c757d',
+    backgroundColor: '#95a5a6', // Concrete gray
   },
   buttonText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: 'bold',
     marginLeft: 8,
   },
   listContent: {
-    paddingBottom: 30,
+    paddingBottom: 100, // Make space for FAB
   },
   paymentCard: {
     backgroundColor: '#ffffff',
-    borderRadius: 12,
+    borderRadius: 15,
     padding: 18,
     marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 4,
+    shadowColor: 'rgba(0, 0, 0, 0.1)',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 6,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    borderLeftWidth: 5,
-    borderLeftColor: '#6f42c1', // Distinct color for payments
+    borderLeftWidth: 6,
+    borderLeftColor: '#8e44ad', // Amethyst purple
   },
   paymentInfo: {
     flex: 1,
   },
   paymentAmount: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#28a745', // Highlight amount in green
-    marginBottom: 4,
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#27ae60', // Emerald green
+    marginBottom: 6,
   },
   paymentDetails: {
     fontSize: 15,
-    color: '#666',
-    marginTop: 2,
-    flexDirection: 'row', // For inline icon and text
+    color: '#555',
+    marginTop: 3,
+    flexDirection: 'row',
     alignItems: 'center',
+  },
+  paymentDetailsBold: {
+    fontWeight: '600',
+    color: '#34495e',
   },
   cardActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginLeft: 15, // Space between info and actions
   },
   actionButton: {
-    marginLeft: 15,
-    padding: 8,
-    borderRadius: 5,
+    marginLeft: 12,
+    padding: 10,
+    borderRadius: 8,
     backgroundColor: '#f8f9fa',
+    shadowColor: 'rgba(0,0,0,0.1)',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
   noDataText: {
     textAlign: 'center',
     marginTop: 50,
-    fontSize: 16,
+    fontSize: 17,
     color: '#888',
+    fontStyle: 'italic',
+  },
+  fab: {
+    position: 'absolute',
+    width: 60,
+    height: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+    right: 30,
+    bottom: 30,
+    backgroundColor: '#3498db', // Blue for FAB
+    borderRadius: 30,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 8,
+    zIndex: 10, // Ensure it's above other elements
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#bdc3c7',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    marginBottom: 20,
+    backgroundColor: '#ffffff',
+    shadowColor: 'rgba(0, 0, 0, 0.05)',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  searchIcon: {
+    marginRight: 10,
+  },
+  searchInput: {
+    flex: 1,
+    height: 50,
+    fontSize: 16,
+    color: '#34495e',
+  },
+  clearSearchButton: {
+    marginLeft: 10,
+    padding: 5,
   },
 });

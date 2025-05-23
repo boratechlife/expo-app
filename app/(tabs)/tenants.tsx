@@ -5,8 +5,9 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  KeyboardAvoidingView, // Added for better input management
-  Platform, // Added for KeyboardAvoidingView
+  KeyboardAvoidingView,
+  Modal, // Import Modal
+  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -23,6 +24,24 @@ interface Tenant {
   created_at: string; // Add created_at
 }
 
+// --- COLOR PALETTE ---
+const Colors = {
+  primary: '#007bff', // Vibrant Blue
+  secondary: '#6c757d', // Muted Gray
+  success: '#28a745', // Green
+  warning: '#ffc107', // Amber/Yellow
+  error: '#dc3545', // Red
+  background: '#f8f9fa', // Light Gray
+  cardBackground: '#ffffff', // Pure White
+  textPrimary: '#212529', // Dark Charcoal
+  textSecondary: '#343a40', // Dark Gray
+  border: '#ced4da', // Light border gray
+  focusBorder: '#007bff', // Primary for focus
+  deleteRed: '#dc3545',
+  editBlue: '#007bff',
+  tenantBorder: '#fd7e14', // A warm orange for tenant cards
+};
+
 export default function TenantsScreen() {
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,6 +55,17 @@ export default function TenantsScreen() {
 
   // State for editing: null if not editing, otherwise the Tenant object being edited
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
+  const [modalVisible, setModalVisible] = useState(false); // State for modal visibility
+
+  // Input Focus States for styling
+  const [isNameFocused, setIsNameFocused] = useState(false);
+  const [isPhoneFocused, setIsPhoneFocused] = useState(false);
+  const [isEmailFocused, setIsEmailFocused] = useState(false);
+
+  // Input Validation States
+  const [isTenantNameValid, setIsTenantNameValid] = useState(true);
+  const [isTenantPhoneValid, setIsTenantPhoneValid] = useState(true);
+  const [isTenantEmailValid, setIsTenantEmailValid] = useState(true);
 
   // Regex for basic email validation
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -47,7 +77,6 @@ export default function TenantsScreen() {
     setLoading(true);
     setError(null); // Clear previous errors
     try {
-      // Use the correct database name 'rental_management'
       const db = await SQLite.openDatabaseAsync('rental_management');
       const allTenants = (await db.getAllAsync(
         'SELECT id, name, phone, email, created_at FROM tenants ORDER BY name'
@@ -67,19 +96,33 @@ export default function TenantsScreen() {
 
   // Input validation function
   const validateInputs = (): boolean => {
+    let isValid = true;
+
     if (!tenantName.trim()) {
-      Alert.alert('Validation Error', 'Tenant Name cannot be empty.');
-      return false;
+      setIsTenantNameValid(false);
+      isValid = false;
+    } else {
+      setIsTenantNameValid(true);
     }
+
     if (tenantPhone.trim() && !phoneRegex.test(tenantPhone.trim())) {
-      Alert.alert('Validation Error', 'Please enter a valid phone number.');
-      return false;
+      setIsTenantPhoneValid(false);
+      isValid = false;
+    } else {
+      setIsTenantPhoneValid(true);
     }
+
     if (tenantEmail.trim() && !emailRegex.test(tenantEmail.trim())) {
-      Alert.alert('Validation Error', 'Please enter a valid email address.');
-      return false;
+      setIsTenantEmailValid(false);
+      isValid = false;
+    } else {
+      setIsTenantEmailValid(true);
     }
-    return true;
+
+    if (!isValid) {
+      Alert.alert('Validation Error', 'Please correct the highlighted fields.');
+    }
+    return isValid;
   };
 
   // Function to handle adding a new tenant
@@ -97,6 +140,7 @@ export default function TenantsScreen() {
       );
       Alert.alert('Success', 'Tenant added successfully!');
       clearForm();
+      setModalVisible(false); // Close modal
       loadTenants();
     } catch (err: any) {
       console.error('Error adding tenant:', err);
@@ -119,6 +163,10 @@ export default function TenantsScreen() {
     setTenantName(tenant.name);
     setTenantPhone(tenant.phone || '');
     setTenantEmail(tenant.email || '');
+    setIsTenantNameValid(true); // Reset validation
+    setIsTenantPhoneValid(true);
+    setIsTenantEmailValid(true);
+    setModalVisible(true); // Open modal for editing
   };
 
   // Function to handle updating an existing tenant
@@ -138,6 +186,7 @@ export default function TenantsScreen() {
       );
       Alert.alert('Success', 'Tenant updated successfully!');
       clearForm();
+      setModalVisible(false); // Close modal
       loadTenants();
     } catch (err: any) {
       console.error('Error updating tenant:', err);
@@ -197,13 +246,19 @@ export default function TenantsScreen() {
     setTenantPhone('');
     setTenantEmail('');
     setEditingTenant(null);
+    setIsTenantNameValid(true); // Reset validation states
+    setIsTenantPhoneValid(true);
+    setIsTenantEmailValid(true);
+    setIsNameFocused(false); // Reset focus states
+    setIsPhoneFocused(false);
+    setIsEmailFocused(false);
   };
 
   // Render loading and error states
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#007bff" />
+        <ActivityIndicator size="large" color={Colors.primary} />
         <Text style={styles.loadingText}>Loading tenants...</Text>
       </View>
     );
@@ -228,74 +283,11 @@ export default function TenantsScreen() {
     >
       <Text style={styles.title}>Manage Tenants</Text>
 
-      {/* Input Form for Add/Edit */}
-      <View style={styles.formContainer}>
-        <TextInput
-          style={styles.input}
-          placeholder="Tenant Name (e.g., John Doe)"
-          value={tenantName}
-          onChangeText={setTenantName}
-          placeholderTextColor="#888"
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Phone Number (e.g., +2547XXXXXXXX)"
-          keyboardType="phone-pad"
-          value={tenantPhone}
-          onChangeText={setTenantPhone}
-          placeholderTextColor="#888"
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Email (Optional, e.g., john.doe@example.com)"
-          keyboardType="email-address"
-          autoCapitalize="none"
-          value={tenantEmail}
-          onChangeText={setTenantEmail}
-          placeholderTextColor="#888"
-        />
-        <View style={styles.buttonRow}>
-          {editingTenant ? (
-            <>
-              <TouchableOpacity
-                style={[styles.button, styles.updateButton]}
-                onPress={handleUpdateTenant}
-                disabled={isFormSubmitting}
-              >
-                <Ionicons name="save" size={20} color="#fff" />
-                <Text style={styles.buttonText}>
-                  {isFormSubmitting ? 'Updating...' : 'Update Tenant'}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.button, styles.cancelButton]}
-                onPress={clearForm}
-                disabled={isFormSubmitting}
-              >
-                <Ionicons name="close-circle" size={20} color="#fff" />
-                <Text style={styles.buttonText}>Cancel</Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <TouchableOpacity
-              style={[styles.button, styles.addButton]}
-              onPress={handleAddTenant}
-              disabled={isFormSubmitting}
-            >
-              <Ionicons name="person-add" size={20} color="#fff" />
-              <Text style={styles.buttonText}>
-                {isFormSubmitting ? 'Adding...' : 'Add New Tenant'}
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
-
       {/* List of Tenants */}
       <Text style={styles.listTitle}>Existing Tenants</Text>
       {tenants.length === 0 ? (
         <Text style={styles.noDataText}>
-          No tenants found. Add some tenants to get started!
+          No tenants found. Tap the '+' button to add one!
         </Text>
       ) : (
         <FlatList
@@ -307,33 +299,59 @@ export default function TenantsScreen() {
                 <Text style={styles.tenantName}>{item.name}</Text>
                 {item.phone ? (
                   <Text style={styles.tenantContact}>
-                    <Ionicons name="call-outline" size={14} color="#666" />{' '}
+                    <Ionicons
+                      name="call-outline"
+                      size={16}
+                      color={Colors.textSecondary}
+                    />{' '}
                     {item.phone}
                   </Text>
                 ) : null}
                 {item.email ? (
                   <Text style={styles.tenantContact}>
-                    <Ionicons name="mail-outline" size={14} color="#666" />{' '}
+                    <Ionicons
+                      name="mail-outline"
+                      size={16}
+                      color={Colors.textSecondary}
+                    />{' '}
                     {item.email}
                   </Text>
                 ) : null}
                 <Text style={styles.tenantCreated}>
-                  <Ionicons name="time-outline" size={14} color="#999" />{' '}
+                  <Ionicons
+                    name="time-outline"
+                    size={14}
+                    color={Colors.secondary}
+                  />{' '}
                   Joined: {new Date(item.created_at).toLocaleDateString()}
                 </Text>
               </View>
               <View style={styles.cardActions}>
                 <TouchableOpacity
                   onPress={() => handleEditPress(item)}
-                  style={styles.actionButton}
+                  style={[
+                    styles.actionButton,
+                    { backgroundColor: Colors.cardBackground },
+                  ]}
                 >
-                  <Ionicons name="create-outline" size={24} color="#007bff" />
+                  <Ionicons
+                    name="create-outline"
+                    size={24}
+                    color={Colors.editBlue}
+                  />
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={() => handleDeleteTenant(item.id)}
-                  style={styles.actionButton}
+                  style={[
+                    styles.actionButton,
+                    { backgroundColor: Colors.cardBackground },
+                  ]}
                 >
-                  <Ionicons name="trash-outline" size={24} color="#dc3545" />
+                  <Ionicons
+                    name="trash-outline"
+                    size={24}
+                    color={Colors.deleteRed}
+                  />
                 </TouchableOpacity>
               </View>
             </View>
@@ -341,6 +359,178 @@ export default function TenantsScreen() {
           contentContainerStyle={styles.listContent}
         />
       )}
+
+      {/* Floating Action Button for Add */}
+      <TouchableOpacity
+        style={styles.fab}
+        onPress={() => {
+          clearForm(); // Ensure form is clear when opening for new entry
+          setModalVisible(true);
+        }}
+      >
+        <Ionicons name="add" size={30} color={Colors.cardBackground} />
+      </TouchableOpacity>
+
+      {/* Add/Edit Tenant Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={modalVisible}
+        onRequestClose={() => {
+          setModalVisible(!modalVisible);
+          clearForm();
+        }}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalContainer}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}
+        >
+          <View style={styles.modalContent}>
+            <TouchableOpacity
+              style={styles.modalCloseButton}
+              onPress={() => {
+                setModalVisible(false);
+                clearForm();
+              }}
+            >
+              <Ionicons
+                name="close-circle"
+                size={30}
+                color={Colors.secondary}
+              />
+            </TouchableOpacity>
+
+            <Text style={styles.modalTitle}>
+              {editingTenant ? 'Edit Tenant' : 'Create New Tenant'}
+            </Text>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>
+                Tenant Name <Text style={styles.requiredIndicator}>*</Text>
+              </Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  !isTenantNameValid && styles.inputError,
+                  isNameFocused && styles.inputFocused,
+                ]}
+                placeholder="e.g., John Doe"
+                value={tenantName}
+                onChangeText={(text) => {
+                  setTenantName(text);
+                  setIsTenantNameValid(true); // Clear error on change
+                }}
+                onFocus={() => setIsNameFocused(true)}
+                onBlur={() => setIsNameFocused(false)}
+                placeholderTextColor={Colors.secondary}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Phone Number</Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  !isTenantPhoneValid && styles.inputError,
+                  isPhoneFocused && styles.inputFocused,
+                ]}
+                placeholder="e.g., +2547XXXXXXXX"
+                keyboardType="phone-pad"
+                value={tenantPhone}
+                onChangeText={(text) => {
+                  setTenantPhone(text);
+                  setIsTenantPhoneValid(true); // Clear error on change
+                }}
+                onFocus={() => setIsPhoneFocused(true)}
+                onBlur={() => setIsPhoneFocused(false)}
+                placeholderTextColor={Colors.secondary}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Email Address</Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  !isTenantEmailValid && styles.inputError,
+                  isEmailFocused && styles.inputFocused,
+                ]}
+                placeholder="e.g., john.doe@example.com"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                value={tenantEmail}
+                onChangeText={(text) => {
+                  setTenantEmail(text);
+                  setIsTenantEmailValid(true); // Clear error on change
+                }}
+                onFocus={() => setIsEmailFocused(true)}
+                onBlur={() => setIsEmailFocused(false)}
+                placeholderTextColor={Colors.secondary}
+              />
+            </View>
+
+            <View style={styles.buttonRow}>
+              {editingTenant ? (
+                <>
+                  <TouchableOpacity
+                    style={[styles.button, styles.updateButton]}
+                    onPress={handleUpdateTenant}
+                    disabled={isFormSubmitting}
+                  >
+                    {isFormSubmitting ? (
+                      <ActivityIndicator color={Colors.cardBackground} />
+                    ) : (
+                      <Ionicons
+                        name="save"
+                        size={20}
+                        color={Colors.cardBackground}
+                      />
+                    )}
+                    <Text style={styles.buttonText}>
+                      {isFormSubmitting ? 'Updating...' : 'Update Tenant'}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.button, styles.cancelButton]}
+                    onPress={() => {
+                      setModalVisible(false);
+                      clearForm();
+                    }}
+                    disabled={isFormSubmitting}
+                  >
+                    <Ionicons
+                      name="close-circle"
+                      size={20}
+                      color={Colors.cardBackground}
+                    />
+                    <Text style={styles.buttonText}>Cancel</Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <TouchableOpacity
+                  style={[styles.button, styles.addButtonModal]}
+                  onPress={handleAddTenant}
+                  disabled={isFormSubmitting}
+                >
+                  {isFormSubmitting ? (
+                    <ActivityIndicator color={Colors.cardBackground} />
+                  ) : (
+                    <Ionicons
+                      name="person-add"
+                      size={20}
+                      color={Colors.cardBackground}
+                    />
+                  )}
+                  <Text style={styles.buttonText}>
+                    {isFormSubmitting ? 'Adding...' : 'Create Tenant'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -349,150 +539,210 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 16,
-    backgroundColor: '#f8f9fa', // Lighter background for a professional feel
+    backgroundColor: Colors.background,
   },
   centered: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: Colors.background,
   },
   title: {
-    fontSize: 28, // Slightly larger title
-    fontWeight: '700', // Bolder
-    marginBottom: 25,
+    fontSize: 34,
+    fontWeight: '800',
+    marginBottom: 30,
     textAlign: 'center',
-    color: '#343a40', // Darker text for contrast
-    textShadowColor: 'rgba(0, 0, 0, 0.1)', // Subtle shadow
+    color: Colors.textPrimary,
+    textShadowColor: 'rgba(0, 0, 0, 0.1)',
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 2,
+    letterSpacing: -0.5,
   },
   listTitle: {
-    fontSize: 22,
-    fontWeight: '600',
-    marginTop: 25, // More spacing
+    fontSize: 24,
+    fontWeight: '700',
+    marginTop: 25,
     marginBottom: 15,
-    color: '#343a40',
-    borderBottomWidth: 2, // Stronger separator
-    borderBottomColor: '#e9ecef', // Lighter border color
+    color: Colors.textPrimary,
+    borderBottomWidth: 2,
+    borderBottomColor: Colors.border,
     paddingBottom: 8,
   },
   loadingText: {
     marginTop: 10,
     fontSize: 16,
-    color: '#6c757d',
+    color: Colors.secondary,
   },
   errorText: {
     fontSize: 16,
-    color: '#dc3545',
+    color: Colors.error,
     textAlign: 'center',
     marginBottom: 15,
   },
   retryButton: {
-    backgroundColor: '#007bff',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
+    backgroundColor: Colors.primary,
+    paddingVertical: 12,
+    paddingHorizontal: 25,
     borderRadius: 8,
+    minHeight: 44, // Ensure touch target
   },
   retryButtonText: {
-    color: '#fff',
+    color: Colors.cardBackground,
     fontSize: 16,
     fontWeight: 'bold',
   },
-  formContainer: {
-    backgroundColor: '#ffffff',
-    borderRadius: 12, // More rounded corners
-    padding: 20,
-    marginBottom: 20,
+  // --- Modal Styles ---
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.6)', // Semi-transparent dark background
+    paddingHorizontal: 20,
+  },
+  modalContent: {
+    backgroundColor: Colors.cardBackground,
+    borderRadius: 15,
+    padding: 25,
+    width: '100%',
+    maxWidth: 400, // Max width for larger screens
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 }, // Deeper shadow
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 15,
+    elevation: 10,
+    position: 'relative', // For close button positioning
+  },
+  modalCloseButton: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    padding: 10, // Increased touch area
+    zIndex: 1,
+  },
+  modalTitle: {
+    fontSize: 26,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  // --- Input Styles ---
+  inputGroup: {
+    marginBottom: 15,
+  },
+  inputLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+    marginBottom: 8,
+  },
+  requiredIndicator: {
+    color: Colors.error,
+    fontWeight: 'bold',
+    marginLeft: 2,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ced4da', // Softer border color
-    borderRadius: 8,
-    padding: 14, // More padding
-    marginBottom: 12,
+    borderColor: Colors.border,
+    borderRadius: 10,
+    padding: 16,
     fontSize: 16,
-    color: '#495057', // Darker text input color
+    color: Colors.textSecondary,
+    backgroundColor: Colors.background,
+    minHeight: 50, // Ensure touch target
   },
+  inputFocused: {
+    borderColor: Colors.focusBorder,
+    borderWidth: 2,
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+  },
+  inputError: {
+    borderColor: Colors.error,
+    borderWidth: 2,
+  },
+  // --- Button Styles (General) ---
   buttonRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between', // Distribute space
-    marginTop: 15,
+    justifyContent: 'space-between',
+    marginTop: 20,
   },
   button: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12, // More vertical padding
+    paddingVertical: 14,
     paddingHorizontal: 15,
-    borderRadius: 8,
+    borderRadius: 10,
     flex: 1,
-    marginHorizontal: 5, // Keep some margin
-    shadowColor: 'rgba(0,0,0,0.2)', // Button shadows
+    marginHorizontal: 5,
+    minHeight: 50, // Ensure touch target
+    shadowColor: 'rgba(0,0,0,0.2)',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 3,
     elevation: 3,
   },
-  addButton: {
-    backgroundColor: '#28a745', // Green for Add
-  },
-  updateButton: {
-    backgroundColor: '#007bff', // Blue for Update
-  },
-  cancelButton: {
-    backgroundColor: '#6c757d', // Gray for Cancel
-  },
   buttonText: {
-    color: '#fff',
+    color: Colors.cardBackground,
     fontSize: 16,
     fontWeight: 'bold',
     marginLeft: 8,
   },
+  addButtonModal: {
+    backgroundColor: Colors.success, // Use success for modal add
+    flex: 1,
+  },
+  updateButton: {
+    backgroundColor: Colors.primary,
+  },
+  cancelButton: {
+    backgroundColor: Colors.secondary,
+  },
+  // --- List/Card Styles ---
   listContent: {
-    paddingBottom: 30, // More padding at the bottom
+    paddingBottom: 80, // Space for FAB
   },
   tenantCard: {
-    backgroundColor: '#ffffff',
+    backgroundColor: Colors.cardBackground,
     borderRadius: 12,
     padding: 18,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 4,
+    marginBottom: 16,
+    shadowColor: Colors.textPrimary, // Darker shadow for more depth
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 8,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    borderLeftWidth: 5, // Highlight card with a border
-    borderLeftColor: '#007bff', // Default blue border
+    borderLeftWidth: 5,
+    borderLeftColor: Colors.tenantBorder, // A warm orange for tenant cards
   },
   tenantInfo: {
-    flex: 1, // Allow info to take up available space
+    flex: 1,
+    marginRight: 15, // Space between info and actions
   },
   tenantName: {
-    fontSize: 19, // Slightly larger name
-    fontWeight: '700', // Bolder name
-    color: '#343a40',
-    marginBottom: 4,
+    fontSize: 20,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    marginBottom: 6,
   },
   tenantContact: {
-    fontSize: 15,
-    color: '#666',
+    fontSize: 16,
+    color: Colors.textSecondary,
     marginTop: 2,
-    flexDirection: 'row', // Align icon and text
+    flexDirection: 'row',
     alignItems: 'center',
+    lineHeight: 22, // Improve readability
   },
   tenantCreated: {
-    fontSize: 13,
-    color: '#999',
-    marginTop: 8,
+    fontSize: 14,
+    color: Colors.secondary,
+    marginTop: 10,
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -502,8 +752,38 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     marginLeft: 15,
-    padding: 8, // More padding for touch area
-    borderRadius: 5, // Slightly rounded action buttons
-    backgroundColor: '#f8f9fa', // Light background for action buttons
+    padding: 10, // Generous padding for touch
+    borderRadius: 50, // Circular shape
+    backgroundColor: Colors.background, // Light background for action buttons
+    minWidth: 44, // Minimum touch target
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  noDataText: {
+    textAlign: 'center',
+    marginTop: 50,
+    fontSize: 16,
+    color: Colors.secondary,
+    paddingHorizontal: 20,
+    lineHeight: 24,
+  },
+  // --- Floating Action Button (FAB) ---
+  fab: {
+    position: 'absolute',
+    bottom: 25,
+    right: 25,
+    backgroundColor: Colors.primary,
+    borderRadius: 30, // Make it circular
+    width: 60,
+    height: 60,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: Colors.textPrimary,
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+    zIndex: 10, // Ensure it's above other content
   },
 });

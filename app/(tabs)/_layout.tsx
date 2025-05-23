@@ -1,9 +1,10 @@
+import { Ionicons } from '@expo/vector-icons'; // Import Ionicons
 import { Tabs } from 'expo-router';
 import React from 'react';
 import { Platform } from 'react-native';
 
 import { HapticTab } from '@/components/HapticTab';
-import { IconSymbol } from '@/components/ui/IconSymbol';
+// import { IconSymbol } from '@/components/ui/IconSymbol'; // No longer needed if using Ionicons directly
 import TabBarBackground from '@/components/ui/TabBarBackground';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
@@ -23,7 +24,7 @@ export default function TabLayout() {
             // Use a transparent background on iOS to show the blur effect
             position: 'absolute',
           },
-          default: {},
+          default: {}, // Empty object for other platforms (Android)
         }),
       }}
     >
@@ -31,45 +32,40 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="house.fill" color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="explore"
-        options={{
-          title: 'Explore',
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="paperplane.fill" color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="tenants"
-        options={{
-          title: 'Tenants',
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="paperplane.fill" color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons
+              size={28}
+              name={focused ? 'home' : 'home-outline'} // Filled when focused, outline when not
+              color={color}
+            />
           ),
         }}
       />
 
       <Tabs.Screen
-        name="details"
+        name="tenants"
         options={{
-          title: 'Details',
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="paperplane.fill" color={color} />
+          title: 'Tenants',
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons
+              size={28}
+              name={focused ? 'people' : 'people-outline'} // People icon for tenants
+              color={color}
+            />
           ),
         }}
       />
+
       <Tabs.Screen
         name="blocks"
         options={{
           title: 'Blocks',
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="paperplane.fill" color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons
+              size={28}
+              name={focused ? 'grid' : 'grid-outline'} // Grid or building icon for blocks
+              color={color}
+            />
           ),
         }}
       />
@@ -77,8 +73,12 @@ export default function TabLayout() {
         name="units"
         options={{
           title: 'Units',
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="paperplane.fill" color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons
+              size={28}
+              name={focused ? 'business' : 'business-outline'} // Business/building for units
+              color={color}
+            />
           ),
         }}
       />
@@ -87,8 +87,12 @@ export default function TabLayout() {
         name="payments"
         options={{
           title: 'Payments',
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="paperplane.fill" color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons
+              size={28}
+              name={focused ? 'cash' : 'cash-outline'} // Cash/card icon for payments
+              color={color}
+            />
           ),
         }}
       />
