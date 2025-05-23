@@ -36,7 +36,7 @@ export default function BlocksScreen() {
   const loadBlocks = async () => {
     setLoading(true);
     try {
-      const db = await SQLite.openDatabaseAsync('rental_management');
+      const db = await SQLite.openDatabaseAsync('rental_management_2');
       const allBlocks = (await db.getAllAsync(
         'SELECT id, name, address, total_units FROM blocks ORDER BY name'
       )) as Block[];
@@ -65,7 +65,7 @@ export default function BlocksScreen() {
     }
 
     try {
-      const db = await SQLite.openDatabaseAsync('rental_management');
+      const db = await SQLite.openDatabaseAsync('rental_management_2');
       await db.runAsync(
         'INSERT INTO blocks (name, address, total_units) VALUES (?, ?, ?)',
         blockName.trim(),
@@ -102,7 +102,7 @@ export default function BlocksScreen() {
     }
 
     try {
-      const db = await SQLite.openDatabaseAsync('rental_management');
+      const db = await SQLite.openDatabaseAsync('rental_management_2');
       await db.runAsync(
         'UPDATE blocks SET name = ?, address = ?, total_units = ? WHERE id = ?',
         blockName.trim(),
@@ -133,7 +133,7 @@ export default function BlocksScreen() {
           text: 'Delete',
           onPress: async () => {
             try {
-              const db = await SQLite.openDatabaseAsync('rental_management');
+              const db = await SQLite.openDatabaseAsync('rental_management_2');
               await db.runAsync('DELETE FROM blocks WHERE id = ?', id);
               Alert.alert('Success', 'Block deleted successfully!');
               loadBlocks(); // Refresh the list

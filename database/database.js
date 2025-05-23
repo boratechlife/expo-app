@@ -4,313 +4,255 @@ import * as SQLite from 'expo-sqlite';
 // Initialize the database tables
 // Initialize the database tables with sample data
 export const initDB = async () => {
-  const db = await SQLite.openDatabaseAsync('rental_management');
+  const db = await SQLite.openDatabaseAsync('rental_management_2');
+  let dbInitialized = false;
+
+  // Check if tables already exist to prevent re-inserting data on every app start
+  // This is a simple check; for production, you might use a versioning system.
+  try {
+    const result = await db.getFirstSync(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='tenants';"
+    );
+    if (result) {
+      console.log('Database already initialized. Skipping data insertion.');
+      dbInitialized = true;
+    }
+  } catch (error) {
+    console.warn(
+      'Could not check if database is initialized, proceeding with creation:',
+      error
+    );
+  }
+
   try {
     await db.execAsync(`
       PRAGMA foreign_keys = ON;
-      
+
       CREATE TABLE IF NOT EXISTS tenants (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
-        phone TEXT,
-        email TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        phone TEXT UNIQUE, -- Phone numbers should ideally be unique
+        email TEXT UNIQUE, -- Emails should be unique, with a basic format check
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        CHECK (email IS NULL OR email LIKE '%@%.%') -- Basic email format validation
       );
-      
+
       CREATE TABLE IF NOT EXISTS blocks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
+        name TEXT NOT NULL UNIQUE, -- Block names should be unique
         address TEXT,
-        total_units INTEGER,
+        total_units INTEGER NOT NULL CHECK (total_units >= 0), -- Total units cannot be negative
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-      
+
       CREATE TABLE IF NOT EXISTS units (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        block_id INTEGER,
+        block_id INTEGER NOT NULL,
         unit_number TEXT NOT NULL,
-        monthly_rent REAL NOT NULL,
-        status TEXT DEFAULT 'vacant',
-        FOREIGN KEY (block_id) REFERENCES blocks (id) on DELETE CASCADE
+        monthly_rent REAL NOT NULL CHECK (monthly_rent >= 0), -- Rent cannot be negative
+        status TEXT NOT NULL DEFAULT 'vacant' CHECK (status IN ('vacant', 'occupied', 'maintenance')), -- Specific statuses
+        FOREIGN KEY (block_id) REFERENCES blocks (id) ON DELETE CASCADE,
+        UNIQUE (block_id, unit_number) -- A unit number must be unique within a block
       );
-      
+
       CREATE TABLE IF NOT EXISTS tenancies (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tenant_id INTEGER,
-        unit_id INTEGER,
+        tenant_id INTEGER NOT NULL , -- A tenant can only have one active tenancy at a time
+        unit_id INTEGER NOT NULL UNIQUE, -- A unit can only have one active tenancy at a time
         start_date TEXT NOT NULL,
         end_date TEXT,
-        status TEXT DEFAULT 'active',
-        FOREIGN KEY (tenant_id) REFERENCES tenants (id) on DELETE CASCADE,
-        FOREIGN KEY (unit_id) REFERENCES units (id) on DELETE CASCADE
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'ended', 'notice')), -- Added 'notice' status
+        FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
+        FOREIGN KEY (unit_id) REFERENCES units (id) ON DELETE CASCADE,
+        CHECK (end_date IS NULL OR end_date > start_date) -- end_date must be after start_date
       );
-      
+
       CREATE TABLE IF NOT EXISTS payments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tenancy_id INTEGER,
-        amount REAL NOT NULL,
+        tenancy_id INTEGER NOT NULL,
+        amount REAL NOT NULL CHECK (amount >= 0), -- Payment amount cannot be negative
         payment_date TEXT NOT NULL,
-        payment_for_month TEXT NOT NULL,
-        payment_method TEXT,
+        payment_for_month TEXT NOT NULL, -- YYYY-MM format
+        payment_method TEXT DEFAULT 'M-PESA' CHECK (payment_method IN ('M-PESA', 'Bank Transfer', 'Cash', 'Cheque', 'Other')), -- Specific payment methods
         notes TEXT,
-        FOREIGN KEY (tenancy_id) REFERENCES tenancies (id) on DELETE CASCADE
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (tenancy_id) REFERENCES tenancies (id) ON DELETE CASCADE
       );
     `);
 
-    console.log('All tables created successfully');
+    console.log('All tables created successfully with improved schema.');
 
-    // Insert sample data based on the images
+    // Only insert sample data if the database was just created
+    if (!dbInitialized) {
+      // Insert blocks
+      await db.execAsync(`
+        INSERT INTO blocks (name, address, total_units) VALUES
+        ('Block A', '123 Main Street', 25),
+        ('Block B', '456 Park Avenue', 18),
+        ('Block C', '789 Oak Road', 8);
+      `);
+      console.log('Blocks data inserted successfully');
 
-    // Insert blocks
-    await db.execAsync(`
-      INSERT INTO blocks (name, address, total_units) VALUES
-      ('Block A', '123 Main Street', 25),
-      ('Block B', '456 Park Avenue', 18),
-      ('Block C', '789 Oak Road', 8);
-    `);
+      // Insert tenants
+      await db.execAsync(`
+        INSERT INTO tenants (name, phone, email) VALUES
+        ('NAOMY JEOKOGEI', '0700000001', 'naomy.j@example.com'),
+        ('BETTY LAGAT', '0700000002', 'betty.l@example.com'),
+        ('MORIS NDICHU/SHARON KENDA', '0700000003', 'moris.n@example.com'),
+        ('PAULINE NANCHALA', '0700000004', 'pauline.n@example.com'),
+        ('JULIUS AGARA', '0700000005', 'julius.a@example.com'),
+        ('IAN SAITOTI', '0700000006', 'ian.s@example.com'),
+        ('NAOMY LASOI', '0700000007', 'naomy.l@example.com'),
+        ('DENNIS KIPLIMO', '0700000008', 'dennis.k@example.com'),
+        ('MOSES OTIENO', '0700000009', 'moses.o@example.com'),
+        ('MOURINE & JUDITH', '0700000010', 'mourine.j@example.com'),
+        ('IRNE', '0700000011', 'irne@example.com'),
+        ('GLADYS JEPKOECH', '0700000012', 'gladys.j@example.com'),
+        ('STELLAH BIRGEN', '0700000013', 'stellah.b@example.com'),
+        ('TAELY MULONGO', '0700000014', 'taely.m@example.com'),
+        ('DARIUS BETT', '0700000015', 'darius.b@example.com'),
+        ('JANE MARWA', '0700000016', 'jane.m@example.com'),
+        ('FAITH JEPCHUMBA', '0700000017', 'faith.j@example.com'),
+        ('NOEL NASIMIYU', '0700000018', 'noel.n@example.com'),
+        ('RUTH JEPCHIRCHIR', '0700000019', 'ruth.j@example.com'),
+        ('FELIX', '0700000020', 'felix@example.com'),
+        ('CYNTHIA LEWIS', '0700000021', 'cynthia.l@example.com'),
+        ('PAUL BIWOTT', '0700000022', 'paul.b@example.com'),
+        ('SHARON TITUS', '0700000023', 'sharon.t@example.com'),
+        ('GIDEON BETT', '0700000024', 'gideon.b@example.com'),
+        ('MORIS NDUNGU', '0700000025', 'moris.ndungu@example.com'),
+        ('SHADRACK KIPTOO', '0700000026', 'shadrack.k@example.com'),
+        ('NOAH KIMELI (SHARON JEPKORIR)', '0700000027', 'noah.k@example.com'),
+        ('LEONARD (MERCY CHEROTICH)', '0700000028', 'leonard@example.com'),
+        ('KEVIN OMONDI', '0700000029', 'kevin.o@example.com'),
+        ('JOAN & SHARON', '0700000030', 'joan.s@example.com'),
+        ('MERCY KOECH', '0700000031', 'mercy.k@example.com'),
+        ('PHILIP ROP', '0700000032', 'philip.r@example.com'),
+        ('VICTOR & STELLAH JEMUTAI', '0700000033', 'victor.j@example.com'),
+        ('CICILIA MUNYESI', '0700000034', 'cicilia.m@example.com'),
+        ('ALLAN DARIUS BETT', '0700000035', 'allan.b@example.com'),
+        ('BRENDA & DIANA', '0700000036', 'brenda.d@example.com'),
+        ('KANGETE', '0700000037', 'kangete@example.com'),
+        ('ISMAEL CHEPKWONY', '0700000038', 'ismael.c@example.com'),
+        ('CHRISTOMANOES KIRWA', '0700000039', 'christomanoes.k@example.com'),
+        ('BRIAN KIPRONO', '0700000040', 'brian.k@example.com'),
+        ('JUSTINE KORIR', '0700000041', 'justine.k@example.com'),
+        ('BRAMWEL AGESA', '0700000042', 'bramwel.a@example.com'),
+        ('NAOMY CHERUIYOT', '0700000043', 'naomy.c@example.com'),
+        ('KEVIN KIBET/COLLINS', '0700000044', 'kevin.k@example.com'),
+        ('VIVIAN JEPTOO', '0700000045', 'vivian.j@example.com'),
+        ('FRANKLINE', '0700000046', 'frankline@example.com'),
+        ('REGINA CHUMO', '0700000047', 'regina.c@example.com'),
+        ('SHARON SUGUT & SANG', '0700000048', 'sharon.s@example.com'),
+        ('KEVIN KARUNDA', '0700000049', 'kevin.karunda@example.com'),
+        ('EVANS KIPRONO', '0700000050', 'evans.k@example.com'),
+        ('GODFREY WAFULA', '0700000051', 'godfrey.w@example.com');
+      `);
+      console.log('Tenants data inserted successfully');
 
-    console.log('Blocks data inserted successfully');
+      // Insert units for Block A
+      await db.execAsync(`
+        INSERT INTO units (block_id, unit_number, monthly_rent, status) VALUES
+        (1, 'A1', 8000, 'occupied'), (1, 'A2', 8000, 'occupied'), (1, 'A3', 8000, 'occupied'),
+        (1, 'A4', 8000, 'occupied'), (1, 'A5', 8000, 'occupied'), (1, 'A6', 8000, 'occupied'),
+        (1, 'A7', 8000, 'occupied'), (1, 'A8', 8000, 'occupied'), (1, 'A9', 8000, 'occupied'),
+        (1, 'A10', 8000, 'occupied'), (1, 'A11', 8000, 'occupied'), (1, 'A12', 8000, 'occupied'),
+        (1, 'A13', 8000, 'occupied'), (1, 'A14', 8000, 'occupied'), (1, 'A15', 8000, 'occupied'),
+        (1, 'A16', 8000, 'occupied'), (1, 'A17', 8000, 'occupied'), (1, 'A18', 8000, 'occupied'),
+        (1, 'A19', 8000, 'occupied'), (1, 'A20', 8000, 'occupied'), (1, 'A21', 8000, 'occupied'),
+        (1, 'A22', 8000, 'occupied'), (1, 'A23', 8000, 'occupied'), (1, 'A24', 8000, 'occupied'),
+        (1, 'A25', 8000, 'occupied');
+      `);
 
-    // Insert tenants - Block A
-    await db.execAsync(`
-      INSERT INTO tenants (name, phone, email) VALUES
-      ('NAOMY JEOKOGEI', '0700000001', 'naomy.j@example.com'),
-      ('BETTY LAGAT', '0700000002', 'betty.l@example.com'),
-      ('MORIS NDICHU/SHARON KENDA', '0700000003', 'moris.n@example.com'),
-      ('PAULINE NANCHALA', '0700000004', 'pauline.n@example.com'),
-      ('JULIUS AGARA', '0700000005', 'julius.a@example.com'),
-      ('IAN SAITOTI', '0700000006', 'ian.s@example.com'),
-      ('NAOMY LASOI', '0700000007', 'naomy.l@example.com'),
-      ('DENNIS KIPLIMO', '0700000008', 'dennis.k@example.com'),
-      ('MOSES OTIENO', '0700000009', 'moses.o@example.com'),
-      ('MOURINE & JUDITH', '0700000010', 'mourine.j@example.com'),
-      ('IRNE', '0700000011', 'irne@example.com'),
-      ('GLADYS JEPKOECH', '0700000012', 'gladys.j@example.com'),
-      ('STELLAH BIRGEN', '0700000013', 'stellah.b@example.com'),
-      ('TAELY MULONGO', '0700000014', 'taely.m@example.com'),
-      ('DARIUS BETT', '0700000015', 'darius.b@example.com'),
-      ('JANE MARWA', '0700000016', 'jane.m@example.com'),
-      ('FAITH JEPCHUMBA', '0700000017', 'faith.j@example.com'),
-      ('NOEL NASIMIYU', '0700000018', 'noel.n@example.com'),
-      ('RUTH JEPCHIRCHIR', '0700000019', 'ruth.j@example.com'),
-      ('FELIX', '0700000020', 'felix@example.com'),
-      ('CYNTHIA LEWIS', '0700000021', 'cynthia.l@example.com'),
-      ('PAUL BIWOTT', '0700000022', 'paul.b@example.com'),
-      ('SHARON TITUS', '0700000023', 'sharon.t@example.com'),
-      ('GIDEON BETT', '0700000024', 'gideon.b@example.com'),
-      ('MORIS NDUNGU', '0700000025', 'moris.ndungu@example.com');
-    `);
+      // Insert units for Block B
+      await db.execAsync(`
+        INSERT INTO units (block_id, unit_number, monthly_rent, status) VALUES
+        (2, 'B1', 9000, 'occupied'), (2, 'B2', 9000, 'occupied'), (2, 'B3', 9000, 'occupied'),
+        (2, 'B4', 9000, 'occupied'), (2, 'B5', 9000, 'occupied'), (2, 'B6', 9000, 'occupied'),
+        (2, 'B7', 9000, 'occupied'), (2, 'B8', 9000, 'occupied'), (2, 'B9', 9000, 'occupied'),
+        (2, 'B10', 9000, 'occupied'), (2, 'B11', 9000, 'occupied'), (2, 'B12', 9000, 'occupied'),
+        (2, 'B13', 9000, 'occupied'), (2, 'B14', 9000, 'occupied'), (2, 'B15', 9000, 'occupied'),
+        (2, 'B16', 9000, 'occupied'), (2, 'B17', 9000, 'occupied'), (2, 'B18', 9000, 'occupied');
+      `);
 
-    // Insert tenants - Block B
-    await db.execAsync(`
-      INSERT INTO tenants (name, phone, email) VALUES
-      ('SHADRACK KIPTOO', '0700000026', 'shadrack.k@example.com'),
-      ('NOAH KIMELI (SHARON JEPKORIR)', '0700000027', 'noah.k@example.com'),
-      ('LEONARD (MERCY CHEROTICH)', '0700000028', 'leonard@example.com'),
-      ('KEVIN OMONDI', '0700000029', 'kevin.o@example.com'),
-      ('JOAN & SHARON', '0700000030', 'joan.s@example.com'),
-      ('MERCY KOECH', '0700000031', 'mercy.k@example.com'),
-      ('PHILIP ROP', '0700000032', 'philip.r@example.com'),
-      ('VICTOR & STELLAH JEMUTAI', '0700000033', 'victor.j@example.com'),
-      ('CICILIA MUNYESI', '0700000034', 'cicilia.m@example.com'),
-      ('ALLAN DARIUS BETT', '0700000035', 'allan.b@example.com'),
-      ('BRENDA & DIANA', '0700000036', 'brenda.d@example.com'),
-      ('KANGETE', '0700000037', 'kangete@example.com'),
-      ('ISMAEL CHEPKWONY', '0700000038', 'ismael.c@example.com'),
-      ('CHRISTOMANOES KIRWA', '0700000039', 'christomanoes.k@example.com'),
-      ('BRIAN KIPRONO', '0700000040', 'brian.k@example.com'),
-      ('JUSTINE KORIR', '0700000041', 'justine.k@example.com'),
-      ('BRAMWEL AGESA', '0700000042', 'bramwel.a@example.com'),
-      ('NAOMY CHERUIYOT', '0700000043', 'naomy.c@example.com');
-    `);
+      // Insert units for Block C
+      await db.execAsync(`
+        INSERT INTO units (block_id, unit_number, monthly_rent, status) VALUES
+        (3, 'C1', 10000, 'occupied'), (3, 'C2', 10000, 'occupied'), (3, 'C3', 10000, 'occupied'),
+        (3, 'C4', 10000, 'occupied'), (3, 'C5', 10000, 'occupied'), (3, 'C6', 10000, 'occupied'),
+        (3, 'C7', 10000, 'occupied'), (3, 'C8', 10000, 'occupied');
+      `);
+      console.log('Units data inserted successfully');
 
-    // Insert tenants - Block C
-    await db.execAsync(`
-      INSERT INTO tenants (name, phone, email) VALUES
-      ('KEVIN KIBET/COLLINS', '0700000044', 'kevin.k@example.com'),
-      ('VIVIAN JEPTOO', '0700000045', 'vivian.j@example.com'),
-      ('FRANKLINE', '0700000046', 'frankline@example.com'),
-      ('REGINA CHUMO', '0700000047', 'regina.c@example.com'),
-      ('SHARON SUGUT & SANG', '0700000048', 'sharon.s@example.com'),
-      ('KEVIN KARUNDA', '0700000049', 'kevin.karunda@example.com'),
-      ('EVANS KIPRONO', '0700000050', 'evans.k@example.com'),
-      ('GODFREY WAFULA', '0700000051', 'godfrey.w@example.com');
-    `);
+      // Create tenancies (link tenants to units)
+      // Block A tenancies
+      await db.execAsync(`
+        INSERT INTO tenancies (tenant_id, unit_id, start_date, status) VALUES
+        (1, 1, '2024-01-01', 'active'), (2, 2, '2024-01-01', 'active'), (3, 3, '2024-01-01', 'active'),
+        (4, 4, '2024-01-01', 'active'), (5, 5, '2024-01-01', 'active'), (6, 6, '2024-01-01', 'active'),
+        (7, 7, '2024-01-01', 'active'), (8, 8, '2024-01-01', 'active'), (9, 9, '2024-01-01', 'active'),
+        (10, 10, '2024-01-01', 'active'), (11, 11, '2024-01-01', 'active'), (12, 12, '2024-01-01', 'active'),
+        (13, 13, '2024-01-01', 'active'), (14, 14, '2024-01-01', 'active'), (15, 15, '2024-01-01', 'active'),
+        (16, 16, '2024-01-01', 'active'), (17, 17, '2024-01-01', 'active'), (18, 18, '2024-01-01', 'active'),
+        (19, 19, '2024-01-01', 'active'), (20, 20, '2024-01-01', 'active'), (21, 21, '2024-01-01', 'active'),
+        (22, 22, '2024-01-01', 'active'), (23, 23, '2024-01-01', 'active'), (24, 24, '2024-01-01', 'active'),
+        (25, 25, '2024-01-01', 'active');
+      `);
 
-    console.log('Tenants data inserted successfully');
+      // Block B tenancies
+      await db.execAsync(`
+        INSERT INTO tenancies (tenant_id, unit_id, start_date, status) VALUES
+        (26, 26, '2024-01-01', 'active'), (27, 27, '2024-01-01', 'active'), (28, 28, '2024-01-01', 'active'),
+        (29, 29, '2024-01-01', 'active'), (30, 30, '2024-01-01', 'active'), (31, 31, '2024-01-01', 'active'),
+        (32, 32, '2024-01-01', 'active'), (33, 33, '2024-01-01', 'active'), (34, 34, '2024-01-01', 'active'),
+        (35, 35, '2024-01-01', 'active'), (36, 36, '2024-01-01', 'active'), (37, 37, '2024-01-01', 'active'),
+        (38, 38, '2024-01-01', 'active'), (39, 39, '2024-01-01', 'active'), (40, 40, '2024-01-01', 'active'),
+        (41, 41, '2024-01-01', 'active'), (42, 42, '2024-01-01', 'active'), (43, 43, '2024-01-01', 'active');
+      `);
 
-    // Insert units for Block A
-    await db.execAsync(`
-      INSERT INTO units (block_id, unit_number, monthly_rent, status) VALUES
-      (1, 'A1', 8000, 'occupied'),
-      (1, 'A2', 8000, 'occupied'),
-      (1, 'A3', 8000, 'occupied'),
-      (1, 'A4', 8000, 'occupied'),
-      (1, 'A5', 8000, 'occupied'),
-      (1, 'A6', 8000, 'occupied'),
-      (1, 'A7', 8000, 'occupied'),
-      (1, 'A8', 8000, 'occupied'),
-      (1, 'A9', 8000, 'occupied'),
-      (1, 'A10', 8000, 'occupied'),
-      (1, 'A11', 8000, 'occupied'),
-      (1, 'A12', 8000, 'occupied'),
-      (1, 'A13', 8000, 'occupied'),
-      (1, 'A14', 8000, 'occupied'),
-      (1, 'A15', 8000, 'occupied'),
-      (1, 'A16', 8000, 'occupied'),
-      (1, 'A17', 8000, 'occupied'),
-      (1, 'A18', 8000, 'occupied'),
-      (1, 'A19', 8000, 'occupied'),
-      (1, 'A20', 8000, 'occupied'),
-      (1, 'A21', 8000, 'occupied'),
-      (1, 'A22', 8000, 'occupied'),
-      (1, 'A23', 8000, 'occupied'),
-      (1, 'A24', 8000, 'occupied'),
-      (1, 'A25', 8000, 'occupied');
-    `);
+      // Block C tenancies
+      await db.execAsync(`
+        INSERT INTO tenancies (tenant_id, unit_id, start_date, status) VALUES
+        (44, 44, '2024-01-01', 'active'), (45, 45, '2024-01-01', 'active'), (46, 46, '2024-01-01', 'active'),
+        (47, 47, '2024-01-01', 'active'), (48, 48, '2024-01-01', 'active'), (49, 49, '2024-01-01', 'active'),
+        (50, 50, '2024-01-01', 'active'), (51, 51, '2024-01-01', 'active');
+      `);
+      console.log('Tenancies data inserted successfully');
 
-    // Insert units for Block B
-    await db.execAsync(`
-      INSERT INTO units (block_id, unit_number, monthly_rent, status) VALUES
-      (2, 'B1', 9000, 'occupied'),
-      (2, 'B2', 9000, 'occupied'),
-      (2, 'B3', 9000, 'occupied'),
-      (2, 'B4', 9000, 'occupied'),
-      (2, 'B5', 9000, 'occupied'),
-      (2, 'B6', 9000, 'occupied'),
-      (2, 'B7', 9000, 'occupied'),
-      (2, 'B8', 9000, 'occupied'),
-      (2, 'B9', 9000, 'occupied'),
-      (2, 'B10', 9000, 'occupied'),
-      (2, 'B11', 9000, 'occupied'),
-      (2, 'B12', 9000, 'occupied'),
-      (2, 'B13', 9000, 'occupied'),
-      (2, 'B14', 9000, 'occupied'),
-      (2, 'B15', 9000, 'occupied'),
-      (2, 'B16', 9000, 'occupied'),
-      (2, 'B17', 9000, 'occupied'),
-      (2, 'B18', 9000, 'occupied');
-    `);
+      // Insert sample payments for May
+      await db.execAsync(`
+        -- Block A payments (some examples)
+        INSERT INTO payments (tenancy_id, amount, payment_date, payment_for_month, payment_method) VALUES
+        (1, 8000, '2024-05-03', '2024-05', 'M-PESA'),
+        (2, 8000, '2024-05-02', '2024-05', 'Bank Transfer'),
+        (3, 4000, '2024-05-05', '2024-05', 'M-PESA'), -- Partial payment
+        (5, 8000, '2024-05-01', '2024-05', 'Cash'),
+        (8, 8000, '2024-05-04', '2024-05', 'M-PESA'),
+        (10, 6000, '2024-05-02', '2024-05', 'M-PESA'), -- Partial payment
+        (15, 8000, '2024-05-03', '2024-05', 'Bank Transfer'),
+        (20, 8000, '2024-05-01', '2024-05', 'M-PESA');
 
-    // Insert units for Block C
-    await db.execAsync(`
-      INSERT INTO units (block_id, unit_number, monthly_rent, status) VALUES
-      (3, 'C1', 10000, 'occupied'),
-      (3, 'C2', 10000, 'occupied'),
-      (3, 'C3', 10000, 'occupied'),
-      (3, 'C4', 10000, 'occupied'),
-      (3, 'C5', 10000, 'occupied'),
-      (3, 'C6', 10000, 'occupied'),
-      (3, 'C7', 10000, 'occupied'),
-      (3, 'C8', 10000, 'occupied');
-    `);
+        -- Block B payments (some examples)
+        INSERT INTO payments (tenancy_id, amount, payment_date, payment_for_month, payment_method) VALUES
+        (26, 9000, '2024-05-02', '2024-05', 'M-PESA'),
+        (28, 9000, '2024-05-03', '2024-05', 'Cash'),
+        (30, 4500, '2024-05-04', '2024-05', 'M-PESA'), -- Partial payment
+        (32, 9000, '2024-05-01', '2024-05', 'M-PESA'),
+        (35, 9000, '2024-05-03', '2024-05', 'Bank Transfer'),
+        (40, 9000, '2024-05-05', '2024-05', 'M-PESA');
 
-    console.log('Units data inserted successfully');
-
-    // Create tenancies (link tenants to units)
-    // Block A tenancies
-    await db.execAsync(`
-      INSERT INTO tenancies (tenant_id, unit_id, start_date, status) VALUES
-      (1, 1, '2024-01-01', 'active'),
-      (2, 2, '2024-01-01', 'active'),
-      (3, 3, '2024-01-01', 'active'),
-      (4, 4, '2024-01-01', 'active'),
-      (5, 5, '2024-01-01', 'active'),
-      (6, 6, '2024-01-01', 'active'),
-      (7, 7, '2024-01-01', 'active'),
-      (8, 8, '2024-01-01', 'active'),
-      (9, 9, '2024-01-01', 'active'),
-      (10, 10, '2024-01-01', 'active'),
-      (11, 11, '2024-01-01', 'active'),
-      (12, 12, '2024-01-01', 'active'),
-      (13, 13, '2024-01-01', 'active'),
-      (14, 14, '2024-01-01', 'active'),
-      (15, 15, '2024-01-01', 'active'),
-      (16, 16, '2024-01-01', 'active'),
-      (17, 17, '2024-01-01', 'active'),
-      (18, 18, '2024-01-01', 'active'),
-      (19, 19, '2024-01-01', 'active'),
-      (20, 20, '2024-01-01', 'active'),
-      (21, 21, '2024-01-01', 'active'),
-      (22, 22, '2024-01-01', 'active'),
-      (23, 23, '2024-01-01', 'active'),
-      (24, 24, '2024-01-01', 'active'),
-      (25, 25, '2024-01-01', 'active');
-    `);
-
-    // Block B tenancies
-    await db.execAsync(`
-      INSERT INTO tenancies (tenant_id, unit_id, start_date, status) VALUES
-      (26, 26, '2024-01-01', 'active'),
-      (27, 27, '2024-01-01', 'active'),
-      (28, 28, '2024-01-01', 'active'),
-      (29, 29, '2024-01-01', 'active'),
-      (30, 30, '2024-01-01', 'active'),
-      (31, 31, '2024-01-01', 'active'),
-      (32, 32, '2024-01-01', 'active'),
-      (33, 33, '2024-01-01', 'active'),
-      (34, 34, '2024-01-01', 'active'),
-      (35, 35, '2024-01-01', 'active'),
-      (36, 36, '2024-01-01', 'active'),
-      (37, 37, '2024-01-01', 'active'),
-      (38, 38, '2024-01-01', 'active'),
-      (39, 39, '2024-01-01', 'active'),
-      (40, 40, '2024-01-01', 'active'),
-      (41, 41, '2024-01-01', 'active'),
-      (42, 42, '2024-01-01', 'active'),
-      (43, 43, '2024-01-01', 'active');
-    `);
-
-    // Block C tenancies
-    await db.execAsync(`
-      INSERT INTO tenancies (tenant_id, unit_id, start_date, status) VALUES
-      (44, 44, '2024-01-01', 'active'),
-      (45, 45, '2024-01-01', 'active'),
-      (46, 46, '2024-01-01', 'active'),
-      (47, 47, '2024-01-01', 'active'),
-      (48, 48, '2024-01-01', 'active'),
-      (49, 49, '2024-01-01', 'active'),
-      (50, 50, '2024-01-01', 'active'),
-      (51, 51, '2024-01-01', 'active');
-    `);
-
-    console.log('Tenancies data inserted successfully');
-
-    // Insert sample payments for May
-    // Some tenants have paid fully, some partially, some haven't paid
-    await db.execAsync(`
-      -- Block A payments (some examples)
-      INSERT INTO payments (tenancy_id, amount, payment_date, payment_for_month, payment_method) VALUES
-      (1, 8000, '2024-05-03', '2024-05', 'M-PESA'),
-      (2, 8000, '2024-05-02', '2024-05', 'Bank Transfer'),
-      (3, 4000, '2024-05-05', '2024-05', 'M-PESA'), -- Partial payment
-      (5, 8000, '2024-05-01', '2024-05', 'Cash'),
-      (8, 8000, '2024-05-04', '2024-05', 'M-PESA'),
-      (10, 6000, '2024-05-02', '2024-05', 'M-PESA'), -- Partial payment
-      (15, 8000, '2024-05-03', '2024-05', 'Bank Transfer'),
-      (20, 8000, '2024-05-01', '2024-05', 'M-PESA');
-      
-      -- Block B payments (some examples)
-      INSERT INTO payments (tenancy_id, amount, payment_date, payment_for_month, payment_method) VALUES
-      (26, 9000, '2024-05-02', '2024-05', 'M-PESA'),
-      (28, 9000, '2024-05-03', '2024-05', 'Cash'),
-      (30, 4500, '2024-05-04', '2024-05', 'M-PESA'), -- Partial payment
-      (32, 9000, '2024-05-01', '2024-05', 'M-PESA'),
-      (35, 9000, '2024-05-03', '2024-05', 'Bank Transfer'),
-      (40, 9000, '2024-05-05', '2024-05', 'M-PESA');
-      
-      -- Block C payments (some examples)
-      INSERT INTO payments (tenancy_id, amount, payment_date, payment_for_month, payment_method) VALUES
-      (44, 10000, '2024-05-01', '2024-05', 'Bank Transfer'),
-      (45, 10000, '2024-05-02', '2024-05', 'M-PESA'),
-      (47, 5000, '2024-05-03', '2024-05', 'M-PESA'),  -- Partial payment
-      (50, 10000, '2024-05-04', '2024-05', 'Cash');
-    `);
-
-    console.log('Payments data inserted successfully');
-    console.log('Database initialized with sample data successfully');
+        -- Block C payments (some examples)
+        INSERT INTO payments (tenancy_id, amount, payment_date, payment_for_month, payment_method) VALUES
+        (44, 10000, '2024-05-01', '2024-05', 'Bank Transfer'),
+        (45, 10000, '2024-05-02', '2024-05', 'M-PESA'),
+        (47, 5000, '2024-05-03', '2024-05', 'M-PESA'),  -- Partial payment
+        (50, 10000, '2024-05-04', '2024-05', 'Cash');
+      `);
+      console.log('Payments data inserted successfully');
+      console.log('Database initialized with sample data successfully');
+    }
   } catch (error) {
-    console.error('Error initializing database:', error);
+    console.error('Error initializing database or inserting data:', error);
   }
 };
 // CRUD operations for tenants

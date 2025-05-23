@@ -48,7 +48,7 @@ export default function UnitsScreen() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const db = await SQLite.openDatabaseAsync('rental_management');
+      const db = await SQLite.openDatabaseAsync('rental_management_2');
 
       // Fetch units with block names
       const allUnits = (await db.getAllAsync(`
@@ -105,7 +105,7 @@ export default function UnitsScreen() {
     }
 
     try {
-      const db = await SQLite.openDatabaseAsync('rental_management');
+      const db = await SQLite.openDatabaseAsync('rental_management_2');
       await db.runAsync(
         'INSERT INTO units (block_id, unit_number, monthly_rent, status) VALUES (?, ?, ?, ?)',
         selectedBlockId,
@@ -147,7 +147,7 @@ export default function UnitsScreen() {
     }
 
     try {
-      const db = await SQLite.openDatabaseAsync('rental_management');
+      const db = await SQLite.openDatabaseAsync('rental_management_2');
       await db.runAsync(
         'UPDATE units SET block_id = ?, unit_number = ?, monthly_rent = ?, status = ? WHERE id = ?',
         selectedBlockId,
@@ -179,7 +179,7 @@ export default function UnitsScreen() {
           text: 'Delete',
           onPress: async () => {
             try {
-              const db = await SQLite.openDatabaseAsync('rental_management');
+              const db = await SQLite.openDatabaseAsync('rental_management_2');
               await db.runAsync('DELETE FROM units WHERE id = ?', id);
               Alert.alert('Success', 'Unit deleted successfully!');
               loadData(); // Refresh the list

@@ -36,7 +36,7 @@ export default function TenantsScreen() {
   const loadTenants = async () => {
     setLoading(true);
     try {
-      const db = await SQLite.openDatabaseAsync('rental_management');
+      const db = await SQLite.openDatabaseAsync('rental_management_2');
       // Fetch phone and email as well
       const allTenants = (await db.getAllAsync(
         'SELECT id, name, phone, email FROM tenants ORDER BY name'
@@ -62,7 +62,7 @@ export default function TenantsScreen() {
     }
 
     try {
-      const db = await SQLite.openDatabaseAsync('rental_management');
+      const db = await SQLite.openDatabaseAsync('rental_management_2');
       await db.runAsync(
         'INSERT INTO tenants (name, phone, email) VALUES (?, ?, ?)',
         tenantName.trim(),
@@ -95,7 +95,7 @@ export default function TenantsScreen() {
     }
 
     try {
-      const db = await SQLite.openDatabaseAsync('rental_management');
+      const db = await SQLite.openDatabaseAsync('rental_management_2');
       await db.runAsync(
         'UPDATE tenants SET name = ?, phone = ?, email = ? WHERE id = ?',
         tenantName.trim(),
@@ -126,7 +126,7 @@ export default function TenantsScreen() {
           text: 'Delete',
           onPress: async () => {
             try {
-              const db = await SQLite.openDatabaseAsync('rental_management');
+              const db = await SQLite.openDatabaseAsync('rental_management_2');
               await db.runAsync('DELETE FROM tenants WHERE id = ?', id);
               Alert.alert('Success', 'Tenant deleted successfully!');
               loadTenants(); // Refresh the list
