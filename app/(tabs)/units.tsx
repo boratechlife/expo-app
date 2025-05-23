@@ -6,6 +6,8 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  KeyboardAvoidingView, // Added for better input management
+  Platform, // Added for KeyboardAvoidingView
   StyleSheet,
   Text,
   TextInput,
@@ -34,6 +36,7 @@ export default function UnitsScreen() {
   const [blocks, setBlocks] = useState<Block[]>([]); // New state for blocks
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isFormSubmitting, setIsFormSubmitting] = useState(false); // To disable buttons during submission
 
   // State for form inputs
   const [unitNumber, setUnitNumber] = useState('');
@@ -47,10 +50,12 @@ export default function UnitsScreen() {
   // Function to load both units and blocks
   const loadData = async () => {
     setLoading(true);
+    setError(null); // Clear previous errors
     try {
-      const db = await SQLite.openDatabaseAsync('rental_management_2');
+      // Use the correct database name 'rental_management'
+      const db = await SQLite.openDatabaseAsync('rental_management');
 
-      // Fetch units with block names
+      // Fetch units with block names and created_at
       const allUnits = (await db.getAllAsync(`
         SELECT
           u.id,
@@ -74,8 +79,12 @@ export default function UnitsScreen() {
       )) as Block[];
       setBlocks(allBlocks);
 
-      // Set default selected block if any exist
-      if (allBlocks.length > 0 && selectedBlockId === null) {
+      // Set default selected block if any exist and none is selected
+      if (
+        allBlocks.length > 0 &&
+        selectedBlockId === null &&
+        editingUnit === null
+      ) {
         setSelectedBlockId(allBlocks[0].id);
       }
     } catch (err) {
@@ -90,22 +99,34 @@ export default function UnitsScreen() {
     loadData();
   }, []);
 
+  // Input validation function
+  const validateInputs = (): boolean => {
+    if (!unitNumber.trim()) {
+      Alert.alert('Validation Error', 'Unit Number cannot be empty.');
+      return false;
+    }
+    if (selectedBlockId === null) {
+      Alert.alert('Validation Error', 'Please select a Block.');
+      return false;
+    }
+    const parsedMonthlyRent = parseFloat(monthlyRent);
+    if (isNaN(parsedMonthlyRent) || parsedMonthlyRent <= 0) {
+      Alert.alert(
+        'Validation Error',
+        'Monthly Rent must be a positive number.'
+      );
+      return false;
+    }
+    return true;
+  };
+
   // Function to handle adding a new unit
   const handleAddUnit = async () => {
-    if (!unitNumber.trim() || !monthlyRent.trim() || selectedBlockId === null) {
-      Alert.alert(
-        'Error',
-        'Unit Number, Monthly Rent, and Block are required.'
-      );
-      return;
-    }
-    if (isNaN(parseFloat(monthlyRent))) {
-      Alert.alert('Error', 'Monthly Rent must be a number.');
-      return;
-    }
+    if (!validateInputs()) return;
+    setIsFormSubmitting(true);
 
     try {
-      const db = await SQLite.openDatabaseAsync('rental_management_2');
+      const db = await SQLite.openDatabaseAsync('rental_management');
       await db.runAsync(
         'INSERT INTO units (block_id, unit_number, monthly_rent, status) VALUES (?, ?, ?, ?)',
         selectedBlockId,
@@ -116,9 +137,27 @@ export default function UnitsScreen() {
       Alert.alert('Success', 'Unit added successfully!');
       clearForm();
       loadData(); // Refresh the list
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error adding unit:', err);
-      Alert.alert('Error', 'Failed to add unit. Please try again.');
+      if (
+        err.message.includes(
+          'UNIQUE constraint failed: units.block_id, units.unit_number'
+        )
+      ) {
+        Alert.alert(
+          'Error',
+          'A unit with this number already exists in the selected block.'
+        );
+      } else if (err.message.includes('FOREIGN KEY constraint failed')) {
+        Alert.alert(
+          'Error',
+          'Invalid Block selected. Please ensure the block exists.'
+        );
+      } else {
+        Alert.alert('Error', 'Failed to add unit. Please try again.');
+      }
+    } finally {
+      setIsFormSubmitting(false);
     }
   };
 
@@ -134,20 +173,11 @@ export default function UnitsScreen() {
   // Function to handle updating an existing unit
   const handleUpdateUnit = async () => {
     if (!editingUnit) return;
-    if (!unitNumber.trim() || !monthlyRent.trim() || selectedBlockId === null) {
-      Alert.alert(
-        'Error',
-        'Unit Number, Monthly Rent, and Block are required.'
-      );
-      return;
-    }
-    if (isNaN(parseFloat(monthlyRent))) {
-      Alert.alert('Error', 'Monthly Rent must be a number.');
-      return;
-    }
+    if (!validateInputs()) return;
+    setIsFormSubmitting(true);
 
     try {
-      const db = await SQLite.openDatabaseAsync('rental_management_2');
+      const db = await SQLite.openDatabaseAsync('rental_management');
       await db.runAsync(
         'UPDATE units SET block_id = ?, unit_number = ?, monthly_rent = ?, status = ? WHERE id = ?',
         selectedBlockId,
@@ -159,9 +189,27 @@ export default function UnitsScreen() {
       Alert.alert('Success', 'Unit updated successfully!');
       clearForm();
       loadData(); // Refresh the list
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error updating unit:', err);
-      Alert.alert('Error', 'Failed to update unit. Please try again.');
+      if (
+        err.message.includes(
+          'UNIQUE constraint failed: units.block_id, units.unit_number'
+        )
+      ) {
+        Alert.alert(
+          'Error',
+          'A unit with this number already exists in the selected block.'
+        );
+      } else if (err.message.includes('FOREIGN KEY constraint failed')) {
+        Alert.alert(
+          'Error',
+          'Invalid Block selected. Please ensure the block exists.'
+        );
+      } else {
+        Alert.alert('Error', 'Failed to update unit. Please try again.');
+      }
+    } finally {
+      setIsFormSubmitting(false);
     }
   };
 
@@ -169,7 +217,7 @@ export default function UnitsScreen() {
   const handleDeleteUnit = async (id: number) => {
     Alert.alert(
       'Confirm Deletion',
-      'Are you sure you want to delete this unit? This cannot be undone.',
+      'Are you sure you want to delete this unit? This will also delete all associated tenancies and payments due to cascading deletes.',
       [
         {
           text: 'Cancel',
@@ -177,18 +225,22 @@ export default function UnitsScreen() {
         },
         {
           text: 'Delete',
+          style: 'destructive',
           onPress: async () => {
             try {
-              const db = await SQLite.openDatabaseAsync('rental_management_2');
+              const db = await SQLite.openDatabaseAsync('rental_management');
               await db.runAsync('DELETE FROM units WHERE id = ?', id);
-              Alert.alert('Success', 'Unit deleted successfully!');
+              Alert.alert(
+                'Success',
+                'Unit and its associated tenancies/payments deleted successfully!'
+              );
               loadData(); // Refresh the list
             } catch (err: any) {
               console.error('Error deleting unit:', err);
               if (err.message.includes('FOREIGN KEY constraint failed')) {
                 Alert.alert(
-                  'Error',
-                  'Cannot delete unit: There are tenancies associated with this unit. Please delete them first.'
+                  'Deletion Restricted',
+                  'Cannot delete unit: This unit is still associated with active tenancies. Please end all related tenancies before deleting the unit.'
                 );
               } else {
                 Alert.alert(
@@ -218,6 +270,7 @@ export default function UnitsScreen() {
     }
   };
 
+  // Render loading and error states
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -231,12 +284,19 @@ export default function UnitsScreen() {
     return (
       <View style={styles.centered}>
         <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={loadData}>
+          <Text style={styles.retryButtonText}>Try Again</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 20}
+    >
       <Text style={styles.title}>Manage Units</Text>
 
       {/* Input Form for Add/Edit */}
@@ -246,12 +306,15 @@ export default function UnitsScreen() {
           placeholder="Unit Number (e.g., A1, B10)"
           value={unitNumber}
           onChangeText={setUnitNumber}
+          placeholderTextColor="#888"
         />
 
         <View style={styles.pickerContainer}>
           <Picker
             selectedValue={selectedBlockId}
-            onValueChange={(itemValue: number) => setSelectedBlockId(itemValue)}
+            onValueChange={(itemValue: number | null) =>
+              setSelectedBlockId(itemValue)
+            }
             style={styles.picker}
             enabled={blocks.length > 0} // Disable if no blocks exist
           >
@@ -271,10 +334,11 @@ export default function UnitsScreen() {
 
         <TextInput
           style={styles.input}
-          placeholder="Monthly Rent"
+          placeholder="Monthly Rent (e.g., 8000.00)"
           keyboardType="numeric"
           value={monthlyRent}
           onChangeText={setMonthlyRent}
+          placeholderTextColor="#888"
         />
 
         <View style={styles.pickerContainer}>
@@ -295,13 +359,17 @@ export default function UnitsScreen() {
               <TouchableOpacity
                 style={[styles.button, styles.updateButton]}
                 onPress={handleUpdateUnit}
+                disabled={isFormSubmitting}
               >
                 <Ionicons name="save" size={20} color="#fff" />
-                <Text style={styles.buttonText}>Update Unit</Text>
+                <Text style={styles.buttonText}>
+                  {isFormSubmitting ? 'Updating...' : 'Update Unit'}
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.button, styles.cancelButton]}
                 onPress={clearForm}
+                disabled={isFormSubmitting}
               >
                 <Ionicons name="close-circle" size={20} color="#fff" />
                 <Text style={styles.buttonText}>Cancel</Text>
@@ -311,9 +379,12 @@ export default function UnitsScreen() {
             <TouchableOpacity
               style={[styles.button, styles.addButton]}
               onPress={handleAddUnit}
+              disabled={isFormSubmitting}
             >
               <Ionicons name="add-circle" size={20} color="#fff" />
-              <Text style={styles.buttonText}>Add New Unit</Text>
+              <Text style={styles.buttonText}>
+                {isFormSubmitting ? 'Adding...' : 'Add New Unit'}
+              </Text>
             </TouchableOpacity>
           )}
         </View>
@@ -329,13 +400,38 @@ export default function UnitsScreen() {
           keyExtractor={(item) => item.id.toString()}
           renderItem={({ item }) => (
             <View style={styles.unitCard}>
-              <View>
+              <View style={styles.unitInfo}>
                 <Text style={styles.unitNumber}>{item.unit_number}</Text>
-                <Text style={styles.unitDetails}>Block: {item.block_name}</Text>
                 <Text style={styles.unitDetails}>
-                  Rent: KES{item.monthly_rent.toFixed(2)}
+                  <Ionicons name="cube-outline" size={14} color="#666" /> Block:{' '}
+                  {item.block_name}
                 </Text>
-                <Text style={styles.unitStatus}>Status: {item.status}</Text>
+                <Text style={styles.unitDetails}>
+                  <Ionicons name="cash-outline" size={14} color="#666" /> Rent:
+                  KES {item.monthly_rent.toFixed(2)}
+                </Text>
+                <Text
+                  style={[
+                    styles.unitStatus,
+                    item.status === 'occupied' && { color: '#28a745' }, // Green for occupied
+                    item.status === 'vacant' && { color: '#ffc107' }, // Orange for vacant
+                    item.status === 'maintenance' && { color: '#17a2b8' }, // Blue for maintenance
+                  ]}
+                >
+                  <Ionicons
+                    name="information-circle-outline"
+                    size={14}
+                    color={
+                      item.status === 'occupied'
+                        ? '#28a745'
+                        : item.status === 'vacant'
+                        ? '#ffc107'
+                        : '#17a2b8'
+                    }
+                  />{' '}
+                  Status:{' '}
+                  {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
+                </Text>
               </View>
               <View style={styles.cardActions}>
                 <TouchableOpacity
@@ -356,7 +452,7 @@ export default function UnitsScreen() {
           contentContainerStyle={styles.listContent}
         />
       )}
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -364,90 +460,117 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 16,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f8f9fa',
   },
   centered: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f8f9fa',
   },
   title: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    marginBottom: 20,
+    fontSize: 28,
+    fontWeight: '700',
+    marginBottom: 25,
     textAlign: 'center',
-    color: '#333',
+    color: '#343a40',
+    textShadowColor: 'rgba(0, 0, 0, 0.1)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   listTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginTop: 20,
-    marginBottom: 10,
-    color: '#333',
+    fontSize: 22,
+    fontWeight: '600',
+    marginTop: 25,
+    marginBottom: 15,
+    color: '#343a40',
+    borderBottomWidth: 2,
+    borderBottomColor: '#e9ecef',
+    paddingBottom: 8,
   },
   loadingText: {
     marginTop: 10,
     fontSize: 16,
-    color: '#555',
+    color: '#6c757d',
   },
   errorText: {
     fontSize: 16,
-    color: 'red',
+    color: '#dc3545',
     textAlign: 'center',
+    marginBottom: 15,
+  },
+  retryButton: {
+    backgroundColor: '#007bff',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    marginTop: 10,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   formContainer: {
     backgroundColor: '#ffffff',
-    borderRadius: 10,
-    padding: 18,
+    borderRadius: 12,
+    padding: 20,
     marginBottom: 20,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowRadius: 8,
+    elevation: 5,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#ced4da',
     borderRadius: 8,
-    padding: 12,
-    marginBottom: 10,
+    padding: 14,
+    marginBottom: 12,
     fontSize: 16,
+    color: '#495057',
   },
   pickerContainer: {
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#ced4da',
     borderRadius: 8,
-    marginBottom: 10,
-    overflow: 'hidden', // Ensures the picker doesn't bleed outside the border radius
+    marginBottom: 12,
+    overflow: 'hidden',
   },
   picker: {
     height: 50,
     width: '100%',
+    color: '#495057', // Ensure picker text color is consistent
   },
   buttonRow: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginTop: 10,
+    justifyContent: 'space-between',
+    marginTop: 15,
   },
   button: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 15,
     borderRadius: 8,
     flex: 1,
     marginHorizontal: 5,
+    shadowColor: 'rgba(0,0,0,0.2)',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3,
   },
   addButton: {
-    backgroundColor: '#28a745', // Green for Add
+    backgroundColor: '#28a745',
   },
   updateButton: {
-    backgroundColor: '#007bff', // Blue for Update
+    backgroundColor: '#007bff',
   },
   cancelButton: {
-    backgroundColor: '#6c757d', // Gray for Cancel
+    backgroundColor: '#6c757d',
   },
   buttonText: {
     color: '#fff',
@@ -456,44 +579,63 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   listContent: {
-    paddingBottom: 20,
+    paddingBottom: 30,
   },
   unitCard: {
     backgroundColor: '#ffffff',
-    borderRadius: 10,
+    borderRadius: 12,
     padding: 18,
     marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowRadius: 6,
+    elevation: 4,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    borderLeftWidth: 5,
+    borderLeftColor: '#fd7e14', // Orange for units
+  },
+  unitInfo: {
+    flex: 1,
   },
   unitNumber: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: 19,
+    fontWeight: '700',
+    color: '#343a40',
+    marginBottom: 4,
   },
   unitDetails: {
     fontSize: 15,
     color: '#666',
     marginTop: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   unitStatus: {
     fontSize: 15,
-    fontWeight: 'bold',
+    fontWeight: '600', // Bolder status
     marginTop: 4,
-    color: '#007bff', // Example color for status
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  unitCreated: {
+    fontSize: 13,
+    color: '#999',
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   cardActions: {
     flexDirection: 'row',
+    alignItems: 'center',
   },
   actionButton: {
     marginLeft: 15,
-    padding: 5,
+    padding: 8,
+    borderRadius: 5,
+    backgroundColor: '#f8f9fa',
   },
   noDataText: {
     textAlign: 'center',

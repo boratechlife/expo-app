@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  KeyboardAvoidingView,
   Platform,
   StyleSheet,
   Text,
@@ -25,7 +26,7 @@ interface Tenancy {
   tenant_name: string;
   unit_id: number;
   unit_number: string;
-  block_name: string;
+  block_name: string; // Including block_name for clearer picker display
   start_date: string;
   end_date: string; // Could be null if active
   status: string; // 'active', 'ended'
@@ -39,6 +40,7 @@ interface Payment {
   payment_for_month: string; // YYYY-MM
   tenant_name: string;
   unit_number: string; // Display for context
+  block_name: string; // Added this as it's fetched for display
 }
 
 export default function PaymentsScreen() {
@@ -46,6 +48,7 @@ export default function PaymentsScreen() {
   const [tenancies, setTenancies] = useState<Tenancy[]>([]); // To select a tenancy for payment
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isFormSubmitting, setIsFormSubmitting] = useState(false); // To disable buttons during submission
 
   // Form input states
   const [selectedTenancyId, setSelectedTenancyId] = useState<number | null>(
@@ -76,17 +79,19 @@ export default function PaymentsScreen() {
     // Expects YYYY-MM format
     if (!dateString) return '';
     const [year, month] = dateString.split('-');
-    const date = new Date(parseInt(year), parseInt(month) - 1, 1); // Month is 0-indexed for Date object
+    // Date object needs a day, so add -01 for consistency. Month is 0-indexed.
+    const date = new Date(parseInt(year), parseInt(month) - 1, 1);
     return date.toLocaleString('default', { month: 'long', year: 'numeric' });
   };
 
   // --- Data Loading ---
   const loadData = async () => {
     setLoading(true);
+    setError(null); // Clear previous errors
     try {
       const db = await SQLite.openDatabaseAsync('rental_management_2');
 
-      // Fetch all payments with tenant, unit details, and payment_for_month
+      // Fetch all payments with tenant, unit, and block details for display
       const allPayments = (await db.getAllAsync(`
         SELECT
           p.id,
@@ -95,7 +100,8 @@ export default function PaymentsScreen() {
           p.payment_date,
           p.payment_for_month,
           t.name AS tenant_name,
-          u.unit_number AS unit_number
+          u.unit_number,
+          b.name AS block_name
         FROM
           payments p
         JOIN
@@ -104,6 +110,8 @@ export default function PaymentsScreen() {
           tenants t ON ten.tenant_id = t.id
         JOIN
           units u ON ten.unit_id = u.id
+        JOIN
+          blocks b ON u.block_id = b.id
         ORDER BY
           p.payment_date DESC, p.id DESC
       `)) as Payment[];
@@ -119,7 +127,7 @@ export default function PaymentsScreen() {
           ten.end_date,
           ten.status,
           t.name AS tenant_name,
-          u.unit_number AS unit_number,
+          u.unit_number,
           b.name AS block_name
         FROM
           tenancies ten
@@ -159,27 +167,37 @@ export default function PaymentsScreen() {
   // --- Date Picker Handlers ---
   const onPaymentDateChange = (event: any, selectedDate?: Date) => {
     const currentDate = selectedDate || paymentDate;
-    setShowPaymentDatePicker(Platform.OS === 'ios');
+    setShowPaymentDatePicker(false); // Close picker after selection
     setPaymentDate(currentDate);
   };
 
   const onPaymentForMonthChange = (event: any, selectedDate?: Date) => {
     const currentDate = selectedDate || paymentForMonthDate;
-    setShowPaymentForMonthPicker(Platform.OS === 'ios');
-    // Even though we pick a date, we only care about the month and year
+    setShowPaymentForMonthPicker(false); // Close picker after selection
     setPaymentForMonthDate(currentDate);
+  };
+
+  // --- Input Validation ---
+  const validateInputs = (): boolean => {
+    if (selectedTenancyId === null) {
+      Alert.alert('Validation Error', 'Please select a Tenancy.');
+      return false;
+    }
+    const amount = parseFloat(paymentAmount);
+    if (isNaN(amount) || amount <= 0) {
+      Alert.alert(
+        'Validation Error',
+        'Payment Amount must be a positive number.'
+      );
+      return false;
+    }
+    return true;
   };
 
   // --- CRUD Operations ---
   const handleAddPayment = async () => {
-    if (selectedTenancyId === null || !paymentAmount.trim()) {
-      Alert.alert('Error', 'Please select a Tenancy and enter an Amount.');
-      return;
-    }
-    if (isNaN(parseFloat(paymentAmount))) {
-      Alert.alert('Error', 'Amount must be a number.');
-      return;
-    }
+    if (!validateInputs()) return;
+    setIsFormSubmitting(true);
 
     try {
       const db = await SQLite.openDatabaseAsync('rental_management_2');
@@ -193,9 +211,18 @@ export default function PaymentsScreen() {
       Alert.alert('Success', 'Payment added successfully!');
       clearForm();
       loadData();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error adding payment:', err);
-      Alert.alert('Error', 'Failed to add payment. Please try again.');
+      if (err.message.includes('FOREIGN KEY constraint failed')) {
+        Alert.alert(
+          'Error',
+          'Invalid Tenancy selected. Please ensure it exists.'
+        );
+      } else {
+        Alert.alert('Error', 'Failed to add payment. Please try again.');
+      }
+    } finally {
+      setIsFormSubmitting(false);
     }
   };
 
@@ -203,9 +230,9 @@ export default function PaymentsScreen() {
     setEditingPayment(payment);
     setSelectedTenancyId(payment.tenancy_id);
     setPaymentAmount(payment.amount.toString());
+    // Convert YYYY-MM-DD string to Date object
     setPaymentDate(new Date(payment.payment_date + 'T00:00:00'));
-    // Recreate Date object for payment_for_month
-    // Assume payment_for_month is YYYY-MM, so add -01 to make it a valid date string for Date object
+    // Recreate Date object for payment_for_month (YYYY-MM to Date object for picker)
     setPaymentForMonthDate(
       new Date(payment.payment_for_month + '-01T00:00:00')
     );
@@ -213,14 +240,8 @@ export default function PaymentsScreen() {
 
   const handleUpdatePayment = async () => {
     if (!editingPayment) return;
-    if (selectedTenancyId === null || !paymentAmount.trim()) {
-      Alert.alert('Error', 'Please select a Tenancy and enter an Amount.');
-      return;
-    }
-    if (isNaN(parseFloat(paymentAmount))) {
-      Alert.alert('Error', 'Amount must be a number.');
-      return;
-    }
+    if (!validateInputs()) return;
+    setIsFormSubmitting(true);
 
     try {
       const db = await SQLite.openDatabaseAsync('rental_management_2');
@@ -235,9 +256,18 @@ export default function PaymentsScreen() {
       Alert.alert('Success', 'Payment updated successfully!');
       clearForm();
       loadData();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error updating payment:', err);
-      Alert.alert('Error', 'Failed to update payment. Please try again.');
+      if (err.message.includes('FOREIGN KEY constraint failed')) {
+        Alert.alert(
+          'Error',
+          'Invalid Tenancy selected. Please ensure it exists.'
+        );
+      } else {
+        Alert.alert('Error', 'Failed to update payment. Please try again.');
+      }
+    } finally {
+      setIsFormSubmitting(false);
     }
   };
 
@@ -252,6 +282,7 @@ export default function PaymentsScreen() {
         },
         {
           text: 'Delete',
+          style: 'destructive',
           onPress: async () => {
             try {
               const db = await SQLite.openDatabaseAsync('rental_management_2');
@@ -298,13 +329,20 @@ export default function PaymentsScreen() {
     return (
       <View style={styles.centered}>
         <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={loadData}>
+          <Text style={styles.retryButtonText}>Try Again</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
   // --- Main UI ---
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 20} // Adjust offset as needed
+    >
       <Text style={styles.title}>Manage Payments</Text>
 
       {/* Input Form for Add/Edit */}
@@ -317,7 +355,7 @@ export default function PaymentsScreen() {
               setSelectedTenancyId(itemValue)
             }
             style={styles.picker}
-            enabled={tenancies.length > 0}
+            enabled={tenancies.length > 0 && !isFormSubmitting} // Disable picker during submission
           >
             {tenancies.length === 0 ? (
               <Picker.Item label="No Active Tenancies" value={null} />
@@ -335,22 +373,25 @@ export default function PaymentsScreen() {
 
         <TextInput
           style={styles.input}
-          placeholder="Payment Amount"
+          placeholder="Payment Amount (e.g., 8000.00)"
           keyboardType="numeric"
           value={paymentAmount}
           onChangeText={setPaymentAmount}
+          editable={!isFormSubmitting}
+          placeholderTextColor="#888"
         />
 
         {/* Payment Date Selector */}
         <View style={styles.datePickerRow}>
-          <Text style={styles.label}>
+          <Text style={styles.dateLabel}>
+            <Ionicons name="calendar-outline" size={18} color="#495057" />{' '}
             Payment Date: {formatDate(paymentDate)}
           </Text>
           <TouchableOpacity
             onPress={() => setShowPaymentDatePicker(true)}
             style={styles.datePickerButton}
+            disabled={isFormSubmitting}
           >
-            <Ionicons name="calendar" size={24} color="#007bff" />
             <Text style={styles.datePickerButtonText}>Select Date</Text>
           </TouchableOpacity>
         </View>
@@ -359,21 +400,22 @@ export default function PaymentsScreen() {
             testID="paymentDatePicker"
             value={paymentDate}
             mode="date"
-            display="default"
+            display={Platform.OS === 'ios' ? 'inline' : 'default'} // Inline for iOS, modal for Android
             onChange={onPaymentDateChange}
           />
         )}
 
-        {/* Payment For Month Selector - Uses DatePicker, but only month/year matters */}
+        {/* Payment For Month Selector */}
         <View style={styles.datePickerRow}>
-          <Text style={styles.label}>
-            Payment For: {getMonthName(formatMonthYear(paymentForMonthDate))}
+          <Text style={styles.dateLabel}>
+            <Ionicons name="cash-outline" size={18} color="#495057" /> Payment
+            For: {getMonthName(formatMonthYear(paymentForMonthDate))}
           </Text>
           <TouchableOpacity
             onPress={() => setShowPaymentForMonthPicker(true)}
             style={styles.datePickerButton}
+            disabled={isFormSubmitting}
           >
-            <Ionicons name="calendar-outline" size={24} color="#007bff" />
             <Text style={styles.datePickerButtonText}>Select Month/Year</Text>
           </TouchableOpacity>
         </View>
@@ -382,7 +424,7 @@ export default function PaymentsScreen() {
             testID="paymentForMonthPicker"
             value={paymentForMonthDate}
             mode="date" // We use 'date' mode and then format to 'YYYY-MM'
-            display="default"
+            display={Platform.OS === 'ios' ? 'inline' : 'default'} // Inline for iOS, modal for Android
             onChange={onPaymentForMonthChange}
           />
         )}
@@ -393,13 +435,17 @@ export default function PaymentsScreen() {
               <TouchableOpacity
                 style={[styles.button, styles.updateButton]}
                 onPress={handleUpdatePayment}
+                disabled={isFormSubmitting}
               >
                 <Ionicons name="save" size={20} color="#fff" />
-                <Text style={styles.buttonText}>Update Payment</Text>
+                <Text style={styles.buttonText}>
+                  {isFormSubmitting ? 'Updating...' : 'Update Payment'}
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.button, styles.cancelButton]}
                 onPress={clearForm}
+                disabled={isFormSubmitting}
               >
                 <Ionicons name="close-circle" size={20} color="#fff" />
                 <Text style={styles.buttonText}>Cancel</Text>
@@ -409,9 +455,12 @@ export default function PaymentsScreen() {
             <TouchableOpacity
               style={[styles.button, styles.addButton]}
               onPress={handleAddPayment}
+              disabled={isFormSubmitting}
             >
               <Ionicons name="add-circle" size={20} color="#fff" />
-              <Text style={styles.buttonText}>Add New Payment</Text>
+              <Text style={styles.buttonText}>
+                {isFormSubmitting ? 'Adding...' : 'Add New Payment'}
+              </Text>
             </TouchableOpacity>
           )}
         </View>
@@ -429,22 +478,25 @@ export default function PaymentsScreen() {
           keyExtractor={(item) => item.id.toString()}
           renderItem={({ item }) => (
             <View style={styles.paymentCard}>
-              <View>
+              <View style={styles.paymentInfo}>
                 <Text style={styles.paymentAmount}>
-                  Amount: ${item.amount.toFixed(2)}
+                  KES {item.amount.toFixed(2)}
                 </Text>
                 <Text style={styles.paymentDetails}>
-                  Payment Date: {item.payment_date}
-                </Text>
-                <Text style={styles.paymentDetails}>
-                  For Month: {getMonthName(item.payment_for_month)}{' '}
-                  {/* Display full month name */}
-                </Text>
-                <Text style={styles.paymentDetails}>
+                  <Ionicons name="person-outline" size={14} color="#666" />{' '}
                   Tenant: {item.tenant_name}
                 </Text>
                 <Text style={styles.paymentDetails}>
-                  Unit: {item.unit_number}
+                  <Ionicons name="business-outline" size={14} color="#666" />{' '}
+                  Unit: {item.block_name} - {item.unit_number}
+                </Text>
+                <Text style={styles.paymentDetails}>
+                  <Ionicons name="calendar-outline" size={14} color="#666" />{' '}
+                  Paid On: {item.payment_date}
+                </Text>
+                <Text style={styles.paymentDetails}>
+                  <Ionicons name="cash-outline" size={14} color="#666" /> For
+                  Month: {getMonthName(item.payment_for_month)}
                 </Text>
               </View>
               <View style={styles.cardActions}>
@@ -466,7 +518,7 @@ export default function PaymentsScreen() {
           contentContainerStyle={styles.listContent}
         />
       )}
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -474,48 +526,67 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 16,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f8f9fa',
   },
   centered: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f8f9fa',
   },
   title: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    marginBottom: 20,
+    fontSize: 28,
+    fontWeight: '700',
+    marginBottom: 25,
     textAlign: 'center',
-    color: '#333',
+    color: '#343a40',
+    textShadowColor: 'rgba(0, 0, 0, 0.1)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   listTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginTop: 20,
-    marginBottom: 10,
-    color: '#333',
+    fontSize: 22,
+    fontWeight: '600',
+    marginTop: 25,
+    marginBottom: 15,
+    color: '#343a40',
+    borderBottomWidth: 2,
+    borderBottomColor: '#e9ecef',
+    paddingBottom: 8,
   },
   loadingText: {
     marginTop: 10,
     fontSize: 16,
-    color: '#555',
+    color: '#6c757d',
   },
   errorText: {
     fontSize: 16,
-    color: 'red',
+    color: '#dc3545',
     textAlign: 'center',
+    marginBottom: 15,
+  },
+  retryButton: {
+    backgroundColor: '#007bff',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    marginTop: 10,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   formContainer: {
     backgroundColor: '#ffffff',
-    borderRadius: 10,
-    padding: 18,
+    borderRadius: 12,
+    padding: 20,
     marginBottom: 20,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowRadius: 8,
+    elevation: 5,
   },
   label: {
     fontSize: 16,
@@ -525,65 +596,82 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#ced4da',
     borderRadius: 8,
-    padding: 12,
-    marginBottom: 10,
+    padding: 14,
+    marginBottom: 12,
     fontSize: 16,
+    color: '#495057',
   },
   pickerContainer: {
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#ced4da',
     borderRadius: 8,
-    marginBottom: 10,
+    marginBottom: 12,
     overflow: 'hidden',
+    backgroundColor: '#f1f3f5',
   },
   picker: {
     height: 50,
     width: '100%',
+    color: '#495057',
   },
   datePickerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
-    padding: 12,
+    marginBottom: 12,
+    padding: 14,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#ced4da',
     borderRadius: 8,
+    backgroundColor: '#f1f3f5',
   },
-  datePickerButton: {
+  dateLabel: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 5,
+    fontSize: 16,
+    color: '#495057',
+  },
+  datePickerButton: {
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    backgroundColor: '#e9ecef',
+    borderRadius: 5,
   },
   datePickerButtonText: {
-    marginLeft: 8,
     color: '#007bff',
-    fontSize: 16,
+    fontSize: 15,
+    fontWeight: 'bold',
   },
   buttonRow: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginTop: 10,
+    justifyContent: 'space-between',
+    marginTop: 15,
   },
   button: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 15,
     borderRadius: 8,
     flex: 1,
     marginHorizontal: 5,
+    shadowColor: 'rgba(0,0,0,0.2)',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3,
   },
   addButton: {
-    backgroundColor: '#28a745', // Green for Add
+    backgroundColor: '#28a745',
   },
   updateButton: {
-    backgroundColor: '#007bff', // Blue for Update
+    backgroundColor: '#007bff',
   },
   cancelButton: {
-    backgroundColor: '#6c757d', // Gray for Cancel
+    backgroundColor: '#6c757d',
   },
   buttonText: {
     color: '#fff',
@@ -592,38 +680,49 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   listContent: {
-    paddingBottom: 20,
+    paddingBottom: 30,
   },
   paymentCard: {
     backgroundColor: '#ffffff',
-    borderRadius: 10,
+    borderRadius: 12,
     padding: 18,
     marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowRadius: 6,
+    elevation: 4,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    borderLeftWidth: 5,
+    borderLeftColor: '#6f42c1', // Distinct color for payments
+  },
+  paymentInfo: {
+    flex: 1,
   },
   paymentAmount: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#28a745', // Highlight amount in green
+    marginBottom: 4,
   },
   paymentDetails: {
     fontSize: 15,
     color: '#666',
     marginTop: 2,
+    flexDirection: 'row', // For inline icon and text
+    alignItems: 'center',
   },
   cardActions: {
     flexDirection: 'row',
+    alignItems: 'center',
   },
   actionButton: {
     marginLeft: 15,
-    padding: 5,
+    padding: 8,
+    borderRadius: 5,
+    backgroundColor: '#f8f9fa',
   },
   noDataText: {
     textAlign: 'center',
