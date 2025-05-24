@@ -17,6 +17,7 @@ interface Block {
   name: string;
   address?: string; // Add address as it's in your DB schema
   total_units: number;
+  monthly_rent: number; // Added monthly_rent to the interface
 }
 
 export default function BlocksScreen() {
@@ -28,6 +29,7 @@ export default function BlocksScreen() {
   const [blockName, setBlockName] = useState('');
   const [blockAddress, setBlockAddress] = useState('');
   const [totalUnits, setTotalUnits] = useState('');
+  const [monthlyRent, setMonthlyRent] = useState(''); // New state for monthly rent
 
   // State for editing: null if not editing, otherwise the Block object being edited
   const [editingBlock, setEditingBlock] = useState<Block | null>(null);
@@ -36,9 +38,9 @@ export default function BlocksScreen() {
   const loadBlocks = async () => {
     setLoading(true);
     try {
-      const db = await SQLite.openDatabaseAsync('rental_management');
+      const db = await SQLite.openDatabaseAsync('rental_management_2');
       const allBlocks = (await db.getAllAsync(
-        'SELECT id, name, address, total_units FROM blocks ORDER BY name'
+        'SELECT id, name, address, total_units, monthly_rent FROM blocks ORDER BY name' // Select monthly_rent
       )) as Block[];
       setBlocks(allBlocks);
     } catch (err) {
@@ -55,22 +57,30 @@ export default function BlocksScreen() {
 
   // Function to handle adding a new block
   const handleAddBlock = async () => {
-    if (!blockName.trim() || !totalUnits.trim()) {
-      Alert.alert('Error', 'Block Name and Total Units are required.');
+    if (!blockName.trim() || !totalUnits.trim() || !monthlyRent.trim()) {
+      Alert.alert(
+        'Error',
+        'Block Name, Total Units, and Monthly Rent are required.'
+      );
       return;
     }
     if (isNaN(parseInt(totalUnits))) {
       Alert.alert('Error', 'Total Units must be a number.');
       return;
     }
+    if (isNaN(parseFloat(monthlyRent))) {
+      Alert.alert('Error', 'Monthly Rent must be a number.');
+      return;
+    }
 
     try {
-      const db = await SQLite.openDatabaseAsync('rental_management');
+      const db = await SQLite.openDatabaseAsync('rental_management_2');
       await db.runAsync(
-        'INSERT INTO blocks (name, address, total_units) VALUES (?, ?, ?)',
+        'INSERT INTO blocks (name, address, total_units, monthly_rent) VALUES (?, ?, ?, ?)', // Insert monthly_rent
         blockName.trim(),
         blockAddress.trim(),
-        parseInt(totalUnits)
+        parseInt(totalUnits),
+        parseFloat(monthlyRent)
       );
       Alert.alert('Success', 'Block added successfully!');
       clearForm(); // Clear input fields
@@ -87,27 +97,36 @@ export default function BlocksScreen() {
     setBlockName(block.name);
     setBlockAddress(block.address || ''); // Handle undefined address
     setTotalUnits(block.total_units.toString());
+    setMonthlyRent(block.monthly_rent.toString()); // Set monthly rent for editing
   };
 
   // Function to handle updating an existing block
   const handleUpdateBlock = async () => {
     if (!editingBlock) return; // Should not happen if edit button is pressed
-    if (!blockName.trim() || !totalUnits.trim()) {
-      Alert.alert('Error', 'Block Name and Total Units are required.');
+    if (!blockName.trim() || !totalUnits.trim() || !monthlyRent.trim()) {
+      Alert.alert(
+        'Error',
+        'Block Name, Total Units, and Monthly Rent are required.'
+      );
       return;
     }
     if (isNaN(parseInt(totalUnits))) {
       Alert.alert('Error', 'Total Units must be a number.');
       return;
     }
+    if (isNaN(parseFloat(monthlyRent))) {
+      Alert.alert('Error', 'Monthly Rent must be a number.');
+      return;
+    }
 
     try {
-      const db = await SQLite.openDatabaseAsync('rental_management');
+      const db = await SQLite.openDatabaseAsync('rental_management_2');
       await db.runAsync(
-        'UPDATE blocks SET name = ?, address = ?, total_units = ? WHERE id = ?',
+        'UPDATE blocks SET name = ?, address = ?, total_units = ?, monthly_rent = ? WHERE id = ?', // Update monthly_rent
         blockName.trim(),
         blockAddress.trim(),
         parseInt(totalUnits),
+        parseFloat(monthlyRent),
         editingBlock.id
       );
       Alert.alert('Success', 'Block updated successfully!');
@@ -133,7 +152,7 @@ export default function BlocksScreen() {
           text: 'Delete',
           onPress: async () => {
             try {
-              const db = await SQLite.openDatabaseAsync('rental_management');
+              const db = await SQLite.openDatabaseAsync('rental_management_2');
               await db.runAsync('DELETE FROM blocks WHERE id = ?', id);
               Alert.alert('Success', 'Block deleted successfully!');
               loadBlocks(); // Refresh the list
@@ -163,6 +182,7 @@ export default function BlocksScreen() {
     setBlockName('');
     setBlockAddress('');
     setTotalUnits('');
+    setMonthlyRent(''); // Clear monthly rent input
     setEditingBlock(null);
   };
 
@@ -207,6 +227,13 @@ export default function BlocksScreen() {
           keyboardType="numeric"
           value={totalUnits}
           onChangeText={setTotalUnits}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Monthly Rent"
+          keyboardType="numeric"
+          value={monthlyRent}
+          onChangeText={setMonthlyRent}
         />
         <View style={styles.buttonRow}>
           {editingBlock ? (
@@ -259,6 +286,9 @@ export default function BlocksScreen() {
                 ) : null}
                 <Text style={styles.blockDetails}>
                   Total Units: {item.total_units}
+                </Text>
+                <Text style={styles.blockDetails}>
+                  Monthly Rent: ${item.monthly_rent.toFixed(2)}
                 </Text>
               </View>
               <View style={styles.cardActions}>

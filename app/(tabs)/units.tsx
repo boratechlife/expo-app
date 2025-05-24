@@ -18,6 +18,7 @@ import {
 interface Block {
   id: number;
   name: string;
+  monthly_rent: number; // monthly_rent is now on the Block interface
 }
 
 interface Unit {
@@ -25,7 +26,7 @@ interface Unit {
   unit_number: string;
   block_id: number;
   block_name: string; // To display block name
-  monthly_rent: number;
+  monthly_rent: number; // This will be the rent *derived* from the block it belongs to
   status: string; // Add status as it's in your DB schema
 }
 
@@ -38,7 +39,7 @@ export default function UnitsScreen() {
   // State for form inputs
   const [unitNumber, setUnitNumber] = useState('');
   const [selectedBlockId, setSelectedBlockId] = useState<number | null>(null); // For Picker
-  const [monthlyRent, setMonthlyRent] = useState('');
+  // monthlyRent input is removed from the form as it's now tied to the block
   const [unitStatus, setUnitStatus] = useState('vacant'); // Default status
 
   // State for editing
@@ -48,17 +49,17 @@ export default function UnitsScreen() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const db = await SQLite.openDatabaseAsync('rental_management');
+      const db = await SQLite.openDatabaseAsync('rental_management_2');
 
-      // Fetch units with block names
+      // Fetch units with block names AND their monthly_rent
       const allUnits = (await db.getAllAsync(`
         SELECT
           u.id,
           u.unit_number,
           u.block_id,
-          u.monthly_rent,
           u.status,
-          b.name AS block_name
+          b.name AS block_name,
+          b.monthly_rent AS monthly_rent -- Get monthly_rent from the blocks table
         FROM
           units u
         JOIN
@@ -68,13 +69,13 @@ export default function UnitsScreen() {
       `)) as Unit[];
       setUnits(allUnits);
 
-      // Fetch blocks for the picker
+      // Fetch blocks for the picker (including monthly_rent if needed for other logic)
       const allBlocks = (await db.getAllAsync(
-        'SELECT id, name FROM blocks ORDER BY name'
+        'SELECT id, name, monthly_rent FROM blocks ORDER BY name'
       )) as Block[];
       setBlocks(allBlocks);
 
-      // Set default selected block if any exist
+      // Set default selected block if any exist and none is selected yet
       if (allBlocks.length > 0 && selectedBlockId === null) {
         setSelectedBlockId(allBlocks[0].id);
       }
@@ -92,25 +93,19 @@ export default function UnitsScreen() {
 
   // Function to handle adding a new unit
   const handleAddUnit = async () => {
-    if (!unitNumber.trim() || !monthlyRent.trim() || selectedBlockId === null) {
-      Alert.alert(
-        'Error',
-        'Unit Number, Monthly Rent, and Block are required.'
-      );
-      return;
-    }
-    if (isNaN(parseFloat(monthlyRent))) {
-      Alert.alert('Error', 'Monthly Rent must be a number.');
+    if (!unitNumber.trim() || selectedBlockId === null) {
+      // monthlyRent is no longer a direct input
+      Alert.alert('Error', 'Unit Number and Block are required.');
       return;
     }
 
     try {
-      const db = await SQLite.openDatabaseAsync('rental_management');
+      const db = await SQLite.openDatabaseAsync('rental_management_2');
+      // Removed monthly_rent from INSERT statement for units
       await db.runAsync(
-        'INSERT INTO units (block_id, unit_number, monthly_rent, status) VALUES (?, ?, ?, ?)',
+        'INSERT INTO units (block_id, unit_number, status) VALUES (?, ?, ?)',
         selectedBlockId,
         unitNumber.trim(),
-        parseFloat(monthlyRent),
         unitStatus
       );
       Alert.alert('Success', 'Unit added successfully!');
@@ -127,32 +122,26 @@ export default function UnitsScreen() {
     setEditingUnit(unit);
     setUnitNumber(unit.unit_number);
     setSelectedBlockId(unit.block_id);
-    setMonthlyRent(unit.monthly_rent.toString());
+    // monthlyRent input is removed, but we keep unit.monthly_rent for display in the card
     setUnitStatus(unit.status);
   };
 
   // Function to handle updating an existing unit
   const handleUpdateUnit = async () => {
     if (!editingUnit) return;
-    if (!unitNumber.trim() || !monthlyRent.trim() || selectedBlockId === null) {
-      Alert.alert(
-        'Error',
-        'Unit Number, Monthly Rent, and Block are required.'
-      );
-      return;
-    }
-    if (isNaN(parseFloat(monthlyRent))) {
-      Alert.alert('Error', 'Monthly Rent must be a number.');
+    if (!unitNumber.trim() || selectedBlockId === null) {
+      // monthlyRent is no longer a direct input
+      Alert.alert('Error', 'Unit Number and Block are required.');
       return;
     }
 
     try {
-      const db = await SQLite.openDatabaseAsync('rental_management');
+      const db = await SQLite.openDatabaseAsync('rental_management_2');
+      // Removed monthly_rent from UPDATE statement for units
       await db.runAsync(
-        'UPDATE units SET block_id = ?, unit_number = ?, monthly_rent = ?, status = ? WHERE id = ?',
+        'UPDATE units SET block_id = ?, unit_number = ?, status = ? WHERE id = ?',
         selectedBlockId,
         unitNumber.trim(),
-        parseFloat(monthlyRent),
         unitStatus,
         editingUnit.id
       );
@@ -179,7 +168,7 @@ export default function UnitsScreen() {
           text: 'Delete',
           onPress: async () => {
             try {
-              const db = await SQLite.openDatabaseAsync('rental_management');
+              const db = await SQLite.openDatabaseAsync('rental_management_2');
               await db.runAsync('DELETE FROM units WHERE id = ?', id);
               Alert.alert('Success', 'Unit deleted successfully!');
               loadData(); // Refresh the list
@@ -207,7 +196,7 @@ export default function UnitsScreen() {
   // Helper to clear form inputs and exit editing mode
   const clearForm = () => {
     setUnitNumber('');
-    setMonthlyRent('');
+    // setMonthlyRent(''); // Removed from form
     setUnitStatus('vacant');
     setEditingUnit(null);
     // Reset selectedBlockId to the first available block if any
@@ -251,7 +240,9 @@ export default function UnitsScreen() {
         <View style={styles.pickerContainer}>
           <Picker
             selectedValue={selectedBlockId}
-            onValueChange={(itemValue: number) => setSelectedBlockId(itemValue)}
+            onValueChange={(itemValue: number | null) =>
+              setSelectedBlockId(itemValue)
+            }
             style={styles.picker}
             enabled={blocks.length > 0} // Disable if no blocks exist
           >
@@ -261,7 +252,9 @@ export default function UnitsScreen() {
               blocks.map((block) => (
                 <Picker.Item
                   key={block.id}
-                  label={block.name}
+                  label={`${block.name} (Rent: KES${block.monthly_rent.toFixed(
+                    2
+                  )})`} // Show block rent in picker
                   value={block.id}
                 />
               ))
@@ -269,6 +262,8 @@ export default function UnitsScreen() {
           </Picker>
         </View>
 
+        {/* Monthly Rent input is REMOVED from unit form */}
+        {/*
         <TextInput
           style={styles.input}
           placeholder="Monthly Rent"
@@ -276,6 +271,7 @@ export default function UnitsScreen() {
           value={monthlyRent}
           onChangeText={setMonthlyRent}
         />
+        */}
 
         <View style={styles.pickerContainer}>
           <Picker
@@ -333,7 +329,8 @@ export default function UnitsScreen() {
                 <Text style={styles.unitNumber}>{item.unit_number}</Text>
                 <Text style={styles.unitDetails}>Block: {item.block_name}</Text>
                 <Text style={styles.unitDetails}>
-                  Rent: KES{item.monthly_rent.toFixed(2)}
+                  Rent: KES{item.monthly_rent.toFixed(2)}{' '}
+                  {/* Display rent from block */}
                 </Text>
                 <Text style={styles.unitStatus}>Status: {item.status}</Text>
               </View>

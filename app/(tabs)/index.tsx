@@ -1,7 +1,13 @@
 // screens/DashboardScreen.js
 import * as SQLite from 'expo-sqlite';
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native'; // Added ActivityIndicator
 
 export default function DashboardScreen() {
   const [stats, setStats] = useState({
@@ -10,66 +16,60 @@ export default function DashboardScreen() {
     totalOccupiedUnits: 0,
     totalVacantUnits: 0,
     totalCollected: 0,
-    totalOutstanding: 0,
+    totalOutstanding: 0, // This will be 0 as monthly_rent is removed for now
   });
 
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const loadStats = async () => {
-      const db = await SQLite.openDatabaseAsync('rental_management');
+      const db = await SQLite.openDatabaseAsync('rental_management_2'); // Ensure db connection is opened here
       try {
         // Get all tenants
         const tenants = (await db.getAllAsync(
           'SELECT * FROM tenants ORDER BY name'
         )) as Array<{ id: number; name: string }>;
 
-        // Get all blocks
+        // Get all blocks to calculate total units
         const blocks = (await db.getAllAsync(
-          'SELECT * FROM blocks ORDER BY name'
+          'SELECT total_units FROM blocks' // Only need total_units
         )) as Array<{ total_units: number }>;
 
-        // Get active tenancies with balances
-        const balances = (await db.getAllAsync(`
-  SELECT t.tenant_id, SUM(p.amount) as total_paid, 
-         (u.monthly_rent * julianday('now') - julianday(t.start_date)) / 30 - SUM(p.amount) as balance
-  FROM tenancies t
-  JOIN units u ON t.unit_id = u.id
-  LEFT JOIN payments p ON t.id = p.tenancy_id
-  GROUP BY t.id
-`)) as Array<{ total_paid: number; balance: number }>;
+        // Get active tenancies and total payments for them
+        // Removed monthly_rent reference as requested
+        const paymentsByTenancy = (await db.getAllAsync(`
+          SELECT 
+            t.id as tenancy_id, 
+            COALESCE(SUM(p.amount), 0) as total_paid
+          FROM tenancies t
+          LEFT JOIN payments p ON t.id = p.tenancy_id
+          WHERE t.status = 'active'
+          GROUP BY t.id
+        `)) as Array<{ tenancy_id: number; total_paid: number }>;
 
         // Calculate totals
         let totalCollected = 0;
-        let totalOutstanding = 0;
+        paymentsByTenancy.forEach((payment) => {
+          totalCollected += payment.total_paid;
+        });
 
-        balances &&
-          balances.forEach(
-            (balance: { total_paid: number; balance: number }) => {
-              totalCollected += balance.total_paid;
-              if (balance.balance > 0) {
-                totalOutstanding += balance.balance;
-              }
-            }
-          );
+        // Total occupied units is simply the count of active tenancies
+        const totalOccupiedUnits = paymentsByTenancy.length;
 
-        const occupiedUnits = balances ? balances.length : 0;
-
-        const totalUnits =
-          blocks &&
-          blocks.reduce<number>(
-            (sum, block: { total_units: number }) =>
-              sum + (block.total_units || 0),
-            0
-          );
+        // Sum up total units from all blocks
+        const totalUnits = blocks.reduce<number>(
+          (sum, block: { total_units: number }) =>
+            sum + (block.total_units || 0),
+          0
+        );
 
         setStats({
-          totalTenants: tenants?.length,
-          totalBlocks: blocks?.length,
-          totalOccupiedUnits: occupiedUnits,
-          totalVacantUnits: totalUnits - occupiedUnits,
-          totalCollected,
-          totalOutstanding,
+          totalTenants: tenants?.length || 0,
+          totalBlocks: blocks?.length || 0,
+          totalOccupiedUnits: totalOccupiedUnits,
+          totalVacantUnits: totalUnits - totalOccupiedUnits,
+          totalCollected: totalCollected,
+          totalOutstanding: 0, // Set to 0 as monthly_rent is not used for calculation here
         });
 
         setLoading(false);
@@ -85,7 +85,8 @@ export default function DashboardScreen() {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <Text>Loading statistics...</Text>
+        <ActivityIndicator size="large" color="#007bff" />
+        <Text style={styles.loadingText}>Loading statistics...</Text>
       </View>
     );
   }
@@ -186,5 +187,11 @@ const styles = StyleSheet.create({
   statLabel: {
     fontSize: 14,
     color: '#666',
+  },
+  loadingText: {
+    // Added loading text style
+    marginTop: 10,
+    fontSize: 16,
+    color: '#555',
   },
 });

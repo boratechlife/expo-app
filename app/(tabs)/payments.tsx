@@ -84,7 +84,7 @@ export default function PaymentsScreen() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const db = await SQLite.openDatabaseAsync('rental_management');
+      const db = await SQLite.openDatabaseAsync('rental_management_2');
 
       // Fetch all payments with tenant, unit details, and payment_for_month
       const allPayments = (await db.getAllAsync(`
@@ -182,7 +182,7 @@ export default function PaymentsScreen() {
     }
 
     try {
-      const db = await SQLite.openDatabaseAsync('rental_management');
+      const db = await SQLite.openDatabaseAsync('rental_management_2');
       await db.runAsync(
         'INSERT INTO payments (tenancy_id, amount, payment_date, payment_for_month) VALUES (?, ?, ?, ?)',
         selectedTenancyId,
@@ -223,7 +223,7 @@ export default function PaymentsScreen() {
     }
 
     try {
-      const db = await SQLite.openDatabaseAsync('rental_management');
+      const db = await SQLite.openDatabaseAsync('rental_management_2');
       await db.runAsync(
         'UPDATE payments SET tenancy_id = ?, amount = ?, payment_date = ?, payment_for_month = ? WHERE id = ?',
         selectedTenancyId,
@@ -254,7 +254,7 @@ export default function PaymentsScreen() {
           text: 'Delete',
           onPress: async () => {
             try {
-              const db = await SQLite.openDatabaseAsync('rental_management');
+              const db = await SQLite.openDatabaseAsync('rental_management_2');
               await db.runAsync('DELETE FROM payments WHERE id = ?', id);
               Alert.alert('Success', 'Payment deleted successfully!');
               loadData();
